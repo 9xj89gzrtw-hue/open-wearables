@@ -92,7 +92,7 @@ class PriorityService:
             )
             for ds in sources
         ]
-        return DataSourceListResponse(items=items, total=len(items))
+        return DataSourceListResponse(items=items, total_count=len(items))
 
     @handle_exceptions
     def get_device_type_priorities(

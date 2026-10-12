@@ -12360,15 +12360,15 @@
             "type": "array",
             "title": "Items"
           },
-          "total": {
+          "total_count": {
             "type": "integer",
-            "title": "Total"
+            "title": "Total Count"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "total"
+          "total_count"
         ],
         "title": "DataSourceListResponse"
       },

@@ -170,7 +170,7 @@ class TestPriorityServiceGetUserDataSources:
 
         result = priority_service.get_user_data_sources(db, user.id)
 
-        assert result.total == 1
+        assert result.total_count == 1
         assert result.items[0].display_name == "Garmin - Forerunner 955"
 
     def test_get_user_data_sources_in_session_objects(self, db: Session, priority_service: PriorityService) -> None:
@@ -180,7 +180,7 @@ class TestPriorityServiceGetUserDataSources:
 
         result = priority_service.get_user_data_sources(db, user.id)
 
-        assert result.total == 1
+        assert result.total_count == 1
         assert result.items[0].display_name == "Apple - Watch7,1"
 
 

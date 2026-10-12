@@ -47,4 +47,4 @@ class DataSourceResponse(BaseModel):
 
 class DataSourceListResponse(BaseModel):
     items: list[DataSourceResponse]
-    total: int
+    total_count: int
