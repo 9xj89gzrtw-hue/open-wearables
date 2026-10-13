@@ -255,11 +255,11 @@ class SensorBio247Data(Base247DataTemplate):
         sleep_id = normalized_sleep["id"]
         start_dt = normalized_sleep.get("start_time")
         end_dt = normalized_sleep.get("end_time")
-        if not start_dt or not end_dt:
+        if not start_dt or not end_dt or end_dt <= start_dt:
             log_structured(
                 self.logger,
                 "warning",
-                "Skipping sleep record: missing start/end time",
+                "Skipping sleep record: missing or degenerate start/end window",
                 provider="sensorbio",
                 task="save_sleep_data",
                 sleep_id=str(sleep_id),

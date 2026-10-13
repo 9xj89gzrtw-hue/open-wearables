@@ -127,7 +127,7 @@ class TestSensorBio247SleepNormalization:
 
 
 class TestSensorBio247SaveSleepData:
-    """save_sleep_data() — skips records with missing start/end; persists valid ones."""
+    """save_sleep_data() — skips records with a missing or reversed window; persists valid ones."""
 
     def test_skips_missing_start_time(self, data_247: SensorBio247Data) -> None:
         db = MagicMock()
@@ -148,6 +148,19 @@ class TestSensorBio247SaveSleepData:
         }
         result = data_247.save_sleep_data(db, USER_ID, normalized)
         assert result is False
+
+    def test_skips_window_that_ends_before_it_starts(self, data_247: SensorBio247Data) -> None:
+        db = MagicMock()
+        normalized = {
+            "id": uuid4(),
+            "start_time": datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc),
+            "end_time": datetime(2024, 1, 15, 0, 0, 0, tzinfo=timezone.utc),
+            "duration_seconds": -28800,
+        }
+        with patch("app.services.providers.sensorbio.data_247.event_record_service") as mock_svc:
+            result = data_247.save_sleep_data(db, USER_ID, normalized)
+        assert result is False
+        mock_svc.create.assert_not_called()
 
     def test_persists_valid_record(self, data_247: SensorBio247Data) -> None:
         db = MagicMock()
