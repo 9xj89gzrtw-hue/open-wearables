@@ -222,7 +222,7 @@ class SensorBio247Data(Base247DataTemplate):
         score = parsed.score
         start_dt = self._from_epoch_seconds(parsed.start_timestamp)
         end_dt = self._from_epoch_seconds(parsed.end_timestamp)
-        duration_seconds = int((parsed.total_sleep_mins or 0) * 60)
+        duration_seconds = int((end_dt - start_dt).total_seconds()) if start_dt and end_dt else 0
 
         return {
             "id": uuid4(),

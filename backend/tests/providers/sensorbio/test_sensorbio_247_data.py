@@ -62,7 +62,7 @@ class TestSensorBio247SleepNormalization:
         assert result is not None
         assert result["start_time"] == datetime.fromtimestamp(1_700_000_000, tz=timezone.utc)
         assert result["end_time"] == datetime.fromtimestamp(1_700_028_800, tz=timezone.utc)
-        assert result["duration_seconds"] == 420 * 60
+        assert result["duration_seconds"] == 28_800  # the start-to-end window, not total_sleep_mins
         assert result["efficiency_percent"] == 88
         assert result["stages"]["deep_seconds"] == 90 * 60
         assert result["stages"]["rem_seconds"] == 120 * 60
