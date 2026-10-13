@@ -14,8 +14,9 @@ Usage (inside Docker):
 """
 
 import argparse
+from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
@@ -35,7 +36,8 @@ def backfill_google_sleep_type(db: Session, *, dry_run: bool) -> int:
         count = db.query(EventRecord).filter(*untyped).count()
         print(f"Would set type on {count} Google sleep row(s).\n\nDry run — no changes made.")
         return count
-    count = db.execute(update(EventRecord).where(*untyped).values(type="sleep_session")).rowcount
+    stmt = update(EventRecord).where(*untyped).values(type="sleep_session")
+    count = cast(CursorResult[tuple[()]], db.execute(stmt)).rowcount
     print(f"Set type on {count} Google sleep row(s).")
     return count
 
