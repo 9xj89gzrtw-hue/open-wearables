@@ -88,10 +88,9 @@ BODY_AVERAGED_SERIES = [
 DEFAULT_AVERAGE_PERIOD_DAYS = 7
 DEFAULT_LATEST_WINDOW_HOURS = 4
 
-# Awake blocks of this length or shorter are brief arousals, not interruptions.
-MIN_INTERRUPTION_MINUTES = 5
-# Stages that show the user asleep. In bed and unknown (e.g. no skin contact) don't, so they can't open or close
-# the sleep period that interruptions are counted in.
+# Sleep interruption constants
+MIN_INTERRUPTION_MINUTES = 5  # Shorter awake blocks are brief arousals, not interruptions
+# Stages that open and close the sleep period; in_bed and unknown don't
 SLEEP_STAGES = frozenset({SleepStageType.SLEEPING, SleepStageType.LIGHT, SleepStageType.DEEP, SleepStageType.REM})
 
 
@@ -106,10 +105,9 @@ def _activity_key(row: dict) -> tuple:
 
 
 def _session_interruptions(stages: list[SleepStage]) -> int:
-    """Awakenings longer than MIN_INTERRUPTION_MINUTES between the first and the last sleep stage.
+    """Awakenings longer than MIN_INTERRUPTION_MINUTES between falling asleep and the final wake-up.
 
-    Back-to-back awake blocks are one awakening: some providers split a single wake-up into several.
-    Lying awake before falling asleep or after the final wake-up is not an interruption.
+    Back-to-back awake blocks count as one awakening.
     """
     stages = sorted(stages, key=lambda stage: stage.start_time)
     asleep = [i for i, stage in enumerate(stages) if stage.stage in SLEEP_STAGES]
@@ -131,11 +129,7 @@ def _session_interruptions(stages: list[SleepStage]) -> int:
 
 
 def _interruptions_count(sessions: list[dict]) -> int | None:
-    """Interruptions across the day's main sleep, counted from each session's stage timeline.
-
-    None when there is no main sleep or one of its sessions has no timeline: counting only the
-    sessions that have one would understate the night.
-    """
+    """Interruptions in the day's main sleep; None without main sleep or when a main session has no timeline."""
     main_sessions = [s for s in sessions if not s["is_nap"]]
     if not main_sessions or any(not s["sleep_stages"] for s in main_sessions):
         return None

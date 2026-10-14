@@ -273,7 +273,7 @@ class TestGetSleepSummaries:
 
     @staticmethod
     def _timeline(start: str, *blocks: tuple[str, int]) -> list[dict[str, str]]:
-        """Contiguous stage blocks from (stage, minutes) pairs, shaped as sleep_details.sleep_stages stores them."""
+        """Back-to-back stage dicts from (stage, minutes) pairs."""
         stages = []
         current = _dt(start)
         for stage, minutes in blocks:
@@ -295,7 +295,6 @@ class TestGetSleepSummaries:
         return result.data[0]
 
     def test_interruptions_count_from_stage_timeline(self, db: Session, service: SummariesService) -> None:
-        """Awakenings over 5 min inside the sleep period count; falling asleep, the morning and short ones don't."""
         user = UserFactory()
         record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
         SleepDetailsFactory(
@@ -319,7 +318,6 @@ class TestGetSleepSummaries:
         assert self._sleep_summary(db, service, user).interruptions_count == 2
 
     def test_interruptions_count_joins_touching_awake_blocks(self, db: Session, service: SummariesService) -> None:
-        """Some providers split one awakening into back-to-back awake blocks; the whole run is one interruption."""
         user = UserFactory()
         record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
         SleepDetailsFactory(
@@ -342,7 +340,6 @@ class TestGetSleepSummaries:
     def test_interruptions_count_keeps_awake_blocks_apart_across_a_gap(
         self, db: Session, service: SummariesService
     ) -> None:
-        """Missing data between two short awake blocks isn't time awake, so they don't add up to an interruption."""
         user = UserFactory()
         record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
         light, first, _gap, second, deep = self._timeline(
@@ -355,7 +352,6 @@ class TestGetSleepSummaries:
     def test_interruptions_count_sleep_period_starts_at_a_sleep_stage(
         self, db: Session, service: SummariesService
     ) -> None:
-        """An unknown block (e.g. no skin contact) before falling asleep doesn't make lying awake an interruption."""
         user = UserFactory()
         record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
         SleepDetailsFactory(
@@ -440,7 +436,6 @@ class TestGetSleepSummaries:
     def test_interruptions_count_is_none_when_a_main_session_has_no_timeline(
         self, db: Session, service: SummariesService
     ) -> None:
-        """Counting only the sessions with a timeline would understate the night, so the count stays unknown."""
         user = UserFactory()
         ds = DataSourceFactory(user=user, provider=ProviderName.GARMIN, source="garmin")
         first = self._make_session(ds, "2026-01-01T22:00:00+00:00", "2026-01-02T02:00:00+00:00")
