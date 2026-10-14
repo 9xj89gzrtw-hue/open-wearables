@@ -90,6 +90,9 @@ DEFAULT_LATEST_WINDOW_HOURS = 4
 
 # Awake blocks of this length or shorter are brief arousals, not interruptions.
 MIN_INTERRUPTION_MINUTES = 5
+# Stages that show the user asleep. In bed and unknown (e.g. no skin contact) don't, so they can't open or close
+# the sleep period that interruptions are counted in.
+SLEEP_STAGES = frozenset({SleepStageType.SLEEPING, SleepStageType.LIGHT, SleepStageType.DEEP, SleepStageType.REM})
 
 
 def _midnight(day: date) -> datetime:
@@ -109,7 +112,7 @@ def _session_interruptions(stages: list[SleepStage]) -> int:
     Lying awake before falling asleep or after the final wake-up is not an interruption.
     """
     stages = sorted(stages, key=lambda stage: stage.start_time)
-    asleep = [i for i, stage in enumerate(stages) if stage.stage != SleepStageType.AWAKE]
+    asleep = [i for i, stage in enumerate(stages) if stage.stage in SLEEP_STAGES]
     if not asleep:
         return 0
     awakenings: list[float] = []  # seconds awake per awakening

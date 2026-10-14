@@ -339,6 +339,40 @@ class TestGetSleepSummaries:
 
         assert self._sleep_summary(db, service, user).interruptions_count == 2
 
+    def test_interruptions_count_keeps_awake_blocks_apart_across_a_gap(
+        self, db: Session, service: SummariesService
+    ) -> None:
+        """Missing data between two short awake blocks isn't time awake, so they don't add up to an interruption."""
+        user = UserFactory()
+        record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        light, first, _gap, second, deep = self._timeline(
+            "2026-01-01T23:00:00+00:00", ("light", 60), ("awake", 4), ("light", 2), ("awake", 4), ("deep", 60)
+        )
+        SleepDetailsFactory(event_record=record, sleep_stages=[light, first, second, deep])
+
+        assert self._sleep_summary(db, service, user).interruptions_count == 0
+
+    def test_interruptions_count_sleep_period_starts_at_a_sleep_stage(
+        self, db: Session, service: SummariesService
+    ) -> None:
+        """An unknown block (e.g. no skin contact) before falling asleep doesn't make lying awake an interruption."""
+        user = UserFactory()
+        record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=record,
+            sleep_stages=self._timeline(
+                "2026-01-01T23:00:00+00:00",
+                ("unknown", 10),
+                ("awake", 20),
+                ("light", 60),
+                ("awake", 10),
+                ("deep", 60),
+                ("unknown", 10),
+            ),
+        )
+
+        assert self._sleep_summary(db, service, user).interruptions_count == 1
+
     def test_interruptions_count_orders_stages_by_time(self, db: Session, service: SummariesService) -> None:
         user = UserFactory()
         record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
