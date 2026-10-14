@@ -1031,6 +1031,7 @@ class EventRecordRepository(
                 EventRecord.zone_offset.label("zone_offset"),
                 duration_seconds.label("duration_seconds"),
                 func.coalesce(SleepDetails.is_nap, False).label("is_nap"),
+                SleepDetails.sleep_stages,
                 DataSource.provider,
                 DataSource.source,
                 DataSource.device_model,
@@ -1058,6 +1059,7 @@ class EventRecordRepository(
                     "zone_offset": row.zone_offset,
                     "duration_minutes": int(row.duration_seconds) // 60 if row.duration_seconds is not None else None,
                     "is_nap": bool(row.is_nap),
+                    "sleep_stages": row.sleep_stages,
                 }
             )
         return sessions_by_key

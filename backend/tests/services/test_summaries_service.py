@@ -110,8 +110,12 @@ class TestGetUserMaxHr:
 class TestGetSleepSummaries:
     def _make_sleep_record(self, user: Any, start: str, end: str) -> Any:
         ds = DataSourceFactory(user=user, provider=ProviderName.GARMIN, source="garmin")
+        return self._make_session(ds, start, end)
+
+    @staticmethod
+    def _make_session(data_source: Any, start: str, end: str) -> Any:
         return EventRecordFactory(
-            data_source=ds,
+            data_source=data_source,
             category="sleep",
             type="sleep",
             start_datetime=_dt(start),
@@ -266,6 +270,154 @@ class TestGetSleepSummaries:
         assert len(result.data) == 3
         assert result.pagination.has_more is True
         assert result.pagination.next_cursor is not None
+
+    @staticmethod
+    def _timeline(start: str, *blocks: tuple[str, int]) -> list[dict[str, str]]:
+        """Contiguous stage blocks from (stage, minutes) pairs, shaped as sleep_details.sleep_stages stores them."""
+        stages = []
+        current = _dt(start)
+        for stage, minutes in blocks:
+            end = current + timedelta(minutes=minutes)
+            stages.append({"stage": stage, "start_time": current.isoformat(), "end_time": end.isoformat()})
+            current = end
+        return stages
+
+    def _sleep_summary(self, db: Session, service: SummariesService, user: Any) -> Any:
+        result = service.get_sleep_summaries(
+            db,
+            user.id,
+            _dt("2026-01-01T00:00:00+00:00"),
+            _dt("2026-01-03T00:00:00+00:00"),
+            cursor=None,
+            limit=10,
+        )
+        assert len(result.data) == 1
+        return result.data[0]
+
+    def test_interruptions_count_from_stage_timeline(self, db: Session, service: SummariesService) -> None:
+        """Awakenings over 5 min inside the sleep period count; falling asleep, the morning and short ones don't."""
+        user = UserFactory()
+        record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=record,
+            sleep_stages=self._timeline(
+                "2026-01-01T23:00:00+00:00",
+                ("awake", 15),
+                ("light", 60),
+                ("awake", 3),
+                ("light", 20),
+                ("awake", 5),
+                ("deep", 60),
+                ("awake", 10),
+                ("rem", 45),
+                ("awake", 6),
+                ("light", 30),
+                ("awake", 20),
+            ),
+        )
+
+        assert self._sleep_summary(db, service, user).interruptions_count == 2
+
+    def test_interruptions_count_joins_touching_awake_blocks(self, db: Session, service: SummariesService) -> None:
+        """Some providers split one awakening into back-to-back awake blocks; the whole run is one interruption."""
+        user = UserFactory()
+        record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=record,
+            sleep_stages=self._timeline(
+                "2026-01-01T23:00:00+00:00",
+                ("light", 60),
+                ("awake", 8),
+                ("awake", 7),
+                ("awake", 14),
+                ("deep", 60),
+                ("awake", 3),
+                ("awake", 4),
+                ("rem", 30),
+            ),
+        )
+
+        assert self._sleep_summary(db, service, user).interruptions_count == 2
+
+    def test_interruptions_count_orders_stages_by_time(self, db: Session, service: SummariesService) -> None:
+        user = UserFactory()
+        record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        fell_asleep, light, awakening, deep, woke_up = self._timeline(
+            "2026-01-01T23:00:00+00:00", ("awake", 15), ("light", 60), ("awake", 10), ("deep", 60), ("awake", 20)
+        )
+        SleepDetailsFactory(event_record=record, sleep_stages=[light, fell_asleep, woke_up, deep, awakening])
+
+        assert self._sleep_summary(db, service, user).interruptions_count == 1
+
+    def test_interruptions_count_is_none_without_main_sleep(self, db: Session, service: SummariesService) -> None:
+        user = UserFactory()
+        ds = DataSourceFactory(user=user, provider=ProviderName.GARMIN, source="garmin")
+        nap = self._make_session(ds, "2026-01-02T14:00:00+00:00", "2026-01-02T15:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=nap,
+            is_nap=True,
+            sleep_stages=self._timeline("2026-01-02T14:00:00+00:00", ("light", 20), ("awake", 10), ("light", 30)),
+        )
+
+        assert self._sleep_summary(db, service, user).interruptions_count is None
+
+    def test_interruptions_count_is_none_without_stage_timeline(self, db: Session, service: SummariesService) -> None:
+        user = UserFactory()
+        record = self._make_sleep_record(user, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        SleepDetailsFactory(event_record=record)
+
+        assert self._sleep_summary(db, service, user).interruptions_count is None
+
+    def test_interruptions_count_ignores_naps(self, db: Session, service: SummariesService) -> None:
+        user = UserFactory()
+        ds = DataSourceFactory(user=user, provider=ProviderName.GARMIN, source="garmin")
+        night = self._make_session(ds, "2026-01-01T23:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=night,
+            sleep_stages=self._timeline("2026-01-01T23:00:00+00:00", ("light", 60), ("awake", 10), ("deep", 60)),
+        )
+        nap = self._make_session(ds, "2026-01-02T14:00:00+00:00", "2026-01-02T15:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=nap,
+            is_nap=True,
+            sleep_stages=self._timeline("2026-01-02T14:00:00+00:00", ("light", 20), ("awake", 10), ("light", 30)),
+        )
+
+        assert self._sleep_summary(db, service, user).interruptions_count == 1
+
+    def test_interruptions_count_sums_main_sessions(self, db: Session, service: SummariesService) -> None:
+        user = UserFactory()
+        ds = DataSourceFactory(user=user, provider=ProviderName.GARMIN, source="garmin")
+        first = self._make_session(ds, "2026-01-01T22:00:00+00:00", "2026-01-02T02:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=first,
+            sleep_stages=self._timeline("2026-01-01T22:00:00+00:00", ("light", 60), ("awake", 10), ("deep", 60)),
+        )
+        second = self._make_session(ds, "2026-01-02T03:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=second,
+            sleep_stages=self._timeline(
+                "2026-01-02T03:00:00+00:00", ("light", 30), ("awake", 8), ("rem", 30), ("awake", 12), ("light", 30)
+            ),
+        )
+
+        assert self._sleep_summary(db, service, user).interruptions_count == 3
+
+    def test_interruptions_count_is_none_when_a_main_session_has_no_timeline(
+        self, db: Session, service: SummariesService
+    ) -> None:
+        """Counting only the sessions with a timeline would understate the night, so the count stays unknown."""
+        user = UserFactory()
+        ds = DataSourceFactory(user=user, provider=ProviderName.GARMIN, source="garmin")
+        first = self._make_session(ds, "2026-01-01T22:00:00+00:00", "2026-01-02T02:00:00+00:00")
+        SleepDetailsFactory(
+            event_record=first,
+            sleep_stages=self._timeline("2026-01-01T22:00:00+00:00", ("light", 60), ("awake", 10), ("deep", 60)),
+        )
+        second = self._make_session(ds, "2026-01-02T03:00:00+00:00", "2026-01-02T07:00:00+00:00")
+        SleepDetailsFactory(event_record=second)
+
+        assert self._sleep_summary(db, service, user).interruptions_count is None
 
 
 class TestSleepPagingPerDate:
