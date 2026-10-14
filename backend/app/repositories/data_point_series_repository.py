@@ -1,4 +1,3 @@
-import contextlib
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import LiteralString, NamedTuple
@@ -39,7 +38,7 @@ from sqlalchemy.schema import CreateTable
 from app.database import DbSession
 from app.models import DataPointSeries, DataPointSeriesArchive, DataSource, DeviceTypePriority, ProviderPriority
 from app.models.series_type_definition import SeriesTypeDefinition
-from app.repositories.data_source_repository import DataSourceRepository
+from app.repositories.data_source_repository import DATA_SOURCE_FIELDS, DataSourceIdentity, DataSourceRepository
 from app.repositories.repositories import (
     CrudRepository,
     source_filter_conditions,
@@ -49,7 +48,6 @@ from app.repositories.repositories import (
 from app.schemas.enums import (
     BUCKET_SIZES,
     AggregationMethod,
-    DeviceType,
     ProviderName,
     Resolution,
     SeriesType,
@@ -72,9 +70,6 @@ from app.schemas.responses.activity import (
 from app.utils.dates import as_utc
 from app.utils.exceptions import handle_exceptions
 from app.utils.pagination import decode_bucket_cursor, decode_cursor
-
-# Identity tuple: (user_id, device_model, source)
-DataSourceIdentity = tuple[UUID, str | None, str | None]
 
 
 class WriteCounts(int):
@@ -175,23 +170,9 @@ class DataPointSeriesRepository(
         Handles duplicate records gracefully by catching IntegrityError and
         returning the existing record instead.
         """
-        data_source = self.create_data_source(db_session, creator)
+        data_source = self.data_source_repo.ensure_for_creator(db_session, creator)
 
-        creation_data = creator.model_dump()
-
-        # Remove schema-only fields before creating the model
-        for redundant_key in (
-            "user_id",
-            "source",
-            "device_model",
-            "provider",
-            "user_connection_id",
-            "software_version",
-            "device_type",
-            "series_type",
-            "data_source_id",
-        ):
-            creation_data.pop(redundant_key, None)
+        creation_data = creator.model_dump(exclude={*DATA_SOURCE_FIELDS, "series_type", "data_source_id"})
 
         # Set the proper values
         creation_data["data_source_id"] = data_source.id
@@ -216,40 +197,10 @@ class DataPointSeriesRepository(
             return WriteCounts(0, 0)
 
         # 1. Resolve all data sources in batch
-        identity_to_source_id = self._resolve_data_sources(db_session, creators)
+        identity_to_source_id = self.data_source_repo.resolve_creators(db_session, creators)
 
         # 2. Build and execute data point batch insert
         return self._insert_data_points(db_session, creators, identity_to_source_id)
-
-    def _resolve_data_sources(
-        self, db_session: DbSession, creators: list[TimeSeriesSampleCreate]
-    ) -> dict[DataSourceIdentity, UUID]:
-        by_provider: dict[ProviderName, list[TimeSeriesSampleCreate]] = {}
-        for c in creators:
-            provider = self.data_source_repo.infer_provider_from_source(c.source)
-            if c.provider:
-                with contextlib.suppress(ValueError):
-                    provider = ProviderName(c.provider)
-            by_provider.setdefault(provider, []).append(c)
-
-        identity_to_source_id: dict[DataSourceIdentity, UUID] = {}
-
-        for provider, provider_creators in by_provider.items():
-            unique_identities: set[DataSourceIdentity] = set()
-            reported_types: dict[DataSourceIdentity, DeviceType] = {}
-            user_connection_id = provider_creators[0].user_connection_id if provider_creators else None
-            for c in provider_creators:
-                identity = (c.user_id, c.device_model, c.source)
-                unique_identities.add(identity)
-                if c.device_type:
-                    reported_types.setdefault(identity, c.device_type)
-
-            batch_result = self.data_source_repo.batch_ensure_data_sources(
-                db_session, provider, user_connection_id, unique_identities, reported_types
-            )
-            identity_to_source_id.update(batch_result)
-
-        return identity_to_source_id
 
     class _StagingRow(NamedTuple):
         """One row as loaded into data_point_series_staging via COPY, in column order."""
@@ -280,8 +231,7 @@ class DataPointSeriesRepository(
         """
         rows: list[DataPointSeriesRepository._StagingRow] = []
         for creator in creators:
-            identity: DataSourceIdentity = (creator.user_id, creator.device_model, creator.source)
-            source_id = source_map.get(identity)
+            source_id = source_map.get(DataSourceIdentity.of(creator))
             if not source_id:
                 # Should not happen if resolve logic is correct, but safe skip.
                 continue
@@ -388,23 +338,6 @@ class DataPointSeriesRepository(
                     return existing
             # Re-raise if not a duplicate or if existing record not found
             raise
-
-    def create_data_source(self, db_session: DbSession, creator: TimeSeriesSampleCreate) -> DataSource:
-        provider = self.data_source_repo.infer_provider_from_source(creator.source)
-        if creator.provider:
-            with contextlib.suppress(ValueError):
-                provider = ProviderName(creator.provider)
-
-        return self.data_source_repo.ensure_data_source(
-            db_session,
-            user_id=creator.user_id,
-            provider=provider,
-            user_connection_id=creator.user_connection_id,
-            device_model=creator.device_model,
-            software_version=creator.software_version,
-            source=creator.source,
-            reported_type=creator.device_type,
-        )
 
     def get_samples(
         self,
