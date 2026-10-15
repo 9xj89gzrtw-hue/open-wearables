@@ -1020,7 +1020,7 @@ class EventRecordRepository(
         Aggregates WorkoutDetails data by date for activity summaries.
 
         Returns list of dicts with keys:
-        - workout_date, source, device_model
+        - workout_date, provider, source, device_model, device_type
         - elevation_meters, distance_meters, energy_burned_kcal
         """
         local_workout_date = cast(
@@ -1031,8 +1031,10 @@ class EventRecordRepository(
         results = (
             db_session.query(
                 local_workout_date.label("workout_date"),
+                DataSource.provider,
                 DataSource.source,
                 DataSource.device_model,
+                DataSource.device_type,
                 # Sum elevation gain for all workouts on that day
                 func.sum(WorkoutDetails.total_elevation_gain).label("elevation_sum"),
                 # Sum distance for all workouts
@@ -1052,8 +1054,10 @@ class EventRecordRepository(
             )
             .group_by(
                 local_workout_date,
+                DataSource.provider,
                 DataSource.source,
                 DataSource.device_model,
+                DataSource.device_type,
             )
             .order_by(asc(local_workout_date))
             .all()
@@ -1064,8 +1068,10 @@ class EventRecordRepository(
             aggregates.append(
                 {
                     "workout_date": row.workout_date,
+                    "provider": row.provider,
                     "source": row.source,
                     "device_model": row.device_model,
+                    "device_type": row.device_type,
                     "elevation_meters": float(row.elevation_sum) if row.elevation_sum is not None else None,
                     "distance_meters": float(row.distance_sum) if row.distance_sum is not None else None,
                     "energy_burned_kcal": float(row.energy_sum) if row.energy_sum is not None else None,
