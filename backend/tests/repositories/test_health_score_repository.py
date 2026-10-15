@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.models import HealthScore, ProviderPriority
 from app.repositories import ProviderPriorityRepository
 from app.repositories.health_score_repository import HealthScoreRepository
-from app.schemas.enums import HealthScoreCategory, ProviderName
+from app.schemas.enums import DeviceType, HealthScoreCategory, ProviderName
 from app.schemas.model_crud.activities import HealthScoreCreate, HealthScoreQueryParams
 from tests.factories import (
     DataSourceFactory,
@@ -35,6 +35,19 @@ from tests.factories import (
 @pytest.fixture
 def repo() -> HealthScoreRepository:
     return HealthScoreRepository(HealthScore)
+
+
+NIGHT = datetime(2026, 9, 24, 7, tzinfo=timezone.utc)
+
+
+def _orders(db: Session) -> tuple[dict[ProviderName, int], dict[DeviceType, int]]:
+    return ProviderPriorityRepository(ProviderPriority).get_priority_order(db), {}
+
+
+def _prioritise(db: Session, *providers: ProviderName) -> None:
+    priorities = ProviderPriorityRepository(ProviderPriority)
+    for rank, provider in enumerate(providers, start=1):
+        priorities.upsert(db, provider, rank)
 
 
 class TestHealthScoreRepositoryCreate:
@@ -317,19 +330,6 @@ class TestHealthScoreRepositoryBulkCreate:
 
         scores = db.query(HealthScore).filter(HealthScore.user_id == user.id).all()
         assert [score.value for score in scores] == [Decimal("80.00")]
-
-
-NIGHT = datetime(2026, 9, 24, 7, tzinfo=timezone.utc)
-
-
-def _orders(db: Session) -> tuple[dict, dict]:
-    return ProviderPriorityRepository(ProviderPriority).get_priority_order(db), {}
-
-
-def _prioritise(db: Session, *providers: ProviderName) -> None:
-    priorities = ProviderPriorityRepository(ProviderPriority)
-    for rank, provider in enumerate(providers, start=1):
-        priorities.upsert(db, provider, rank)
 
 
 class TestHealthScoreRepositorySourcePriority:

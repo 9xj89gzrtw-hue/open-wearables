@@ -3666,7 +3666,7 @@
           "External: Health Scores"
         ],
         "summary": "List Health Scores",
-        "description": "Returns health scores (sleep, recovery, readiness, etc.) for a user.\n\nOW scores (provider `internal`) are computed for each of the user's data sources; one per category\nand day is returned, from the source ranked highest in the provider and device type priorities.\nScores reported by providers are returned as they are.",
+        "description": "Returns health scores (sleep, recovery, readiness, etc.) for a user.\n\nOW scores (provider `internal`) can be computed from several of the user's data sources; one per\ncategory and day is returned, from the source ranked highest in the provider and device type priorities.\nScores reported by providers are returned as they are.",
         "operationId": "list_health_scores_api_v1_users__user_id__health_scores_get",
         "security": [
           {

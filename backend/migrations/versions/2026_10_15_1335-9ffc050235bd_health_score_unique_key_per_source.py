@@ -24,7 +24,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Concurrently, so building them on a large health_score does not block writes. The old
-    # constraint keeps rows unique until both indexes are in place.
+    # constraint keeps rows unique until both indexes are in place. No if_not_exists: a failed
+    # concurrent build leaves an invalid index, which it would skip before the constraint is dropped.
     with op.get_context().autocommit_block():
         op.create_index(
             "uq_health_score_unsourced_time",

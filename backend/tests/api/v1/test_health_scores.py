@@ -31,11 +31,15 @@ class TestHealthScoresEndpoint:
         oura = DataSourceFactory(user=user, provider=ProviderName.OURA)
         for source in (garmin, oura):
             HealthScoreFactory(data_source=source, provider=ProviderName.INTERNAL, recorded_at=night)
+        HealthScoreFactory(data_source_id=None, user_id=user.id, provider=ProviderName.GARMIN, recorded_at=night)
         headers = api_key_headers(ApiKeyFactory().plain_key)
 
         picked = client.get(f"/api/v1/users/{user.id}/health-scores", headers=headers).json()
 
-        assert [score["source"]["provider"] for score in picked["data"]] == ["garmin"]
+        assert {score["provider"]: (score["source"] or {}).get("provider") for score in picked["data"]} == {
+            "internal": "garmin",
+            "garmin": None,
+        }
 
     def test_list_health_scores_success(self, client: TestClient, db: Session) -> None:
         user = UserFactory()

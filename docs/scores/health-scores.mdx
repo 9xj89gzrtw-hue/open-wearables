@@ -38,7 +38,7 @@ This means you can surface both in your application - the OW scores for a consis
 
 ### Which OW score the API returns
 
-OW computes its scores for each of a user's data sources. `GET /api/v1/users/{user_id}/health-scores` returns one OW score per category and day: the one from the source ranked highest in the provider and device type priorities, the same ranking the summaries use. Each score's `source` tells which source it came from. Provider scores are always returned as they are.
+OW computes its scores for each of a user's data sources. `GET /api/v1/users/{user_id}/health-scores` returns one OW score per category and day: the one from the source ranked highest in the [provider and device type priorities](/developer-portal/settings/priorities), the same ranking the summaries use. Each score's `source` tells which source it came from. Provider scores are always returned as they are.
 
 ---
 
