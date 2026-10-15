@@ -229,6 +229,7 @@ class SummariesService:
                 SeriesType.steps,
                 SeriesType.active_energy,
                 SeriesType.basal_energy,
+                SeriesType.total_energy,
                 SeriesType.heart_rate,
                 SeriesType.distance_walking_running,
                 SeriesType.flights_climbed,
@@ -604,9 +605,9 @@ class SummariesService:
             # not additive - providers report daily totals that include workout calories
             active_cal = result.get("active_energy_sum")
             basal_cal = result.get("basal_energy_sum")
-            total_cal = None
-            if active_cal is not None or basal_cal is not None:
-                total_cal = (active_cal or 0.0) + (basal_cal or 0.0)
+            total_cal = result.get("total_energy_sum")
+            if total_cal is None and active_cal is not None and basal_cal is not None:
+                total_cal = active_cal + basal_cal
 
             # Active minutes: prefer the provider-reported daily active time (Garmin
             # activeTimeInSeconds, Oura high+medium+low activity time, Polar active_duration).
@@ -629,7 +630,6 @@ class SummariesService:
                     vigorous=vigorous,
                 )
 
-            steps = result.get("steps_sum")
             summary = ActivitySummary(
                 date=result["activity_date"],
                 source=SourceMetadata(
@@ -638,7 +638,7 @@ class SummariesService:
                     device=result.get("device_model"),
                     device_type=result.get("device_type"),
                 ),
-                steps=steps if steps is not None else None,
+                steps=result.get("steps_sum"),
                 distance_meters=total_distance,
                 floors_climbed=floors_climbed,
                 elevation_meters=elevation_meters,
@@ -705,6 +705,7 @@ class SummariesService:
                 "steps_sum": None,
                 "active_energy_sum": None,
                 "basal_energy_sum": None,
+                "total_energy_sum": None,
                 "hr_avg": None,
                 "hr_max": None,
                 "hr_min": None,
