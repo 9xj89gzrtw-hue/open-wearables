@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from logging import getLogger
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from celery import current_app as celery_app
@@ -117,7 +117,7 @@ def load_sleep_states(user_id: str) -> dict[str, SleepState]:
         redis_client.delete(legacy_key(user_id))
 
     states: dict[str, SleepState] = {}
-    for field, raw in redis_client.hgetall(key(user_id)).items():
+    for field, raw in cast(dict[str, str], redis_client.hgetall(key(user_id))).items():
         if state := _parse_sleep_state(user_id, raw):
             states[field] = state
     return states
