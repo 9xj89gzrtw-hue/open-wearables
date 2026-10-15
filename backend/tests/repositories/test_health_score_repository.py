@@ -418,6 +418,24 @@ class TestHealthScoreRepositorySourcePriority:
         assert total == 3
         assert sorted(score.provider for score, _ in results) == ["garmin", "internal", "oura"]
 
+    def test_an_ow_score_with_a_source_beats_one_without(self, db: Session, repo: HealthScoreRepository) -> None:
+        """Even when the source's provider is missing from the priorities."""
+        user = UserFactory()
+        sourced = self._ow(
+            DataSourceFactory(user=user, provider=ProviderName.GARMIN), category=HealthScoreCategory.RESILIENCE
+        )
+        HealthScoreFactory(
+            data_source_id=None,
+            user_id=user.id,
+            provider=ProviderName.INTERNAL,
+            category=HealthScoreCategory.RESILIENCE,
+            recorded_at=NIGHT,
+        )
+
+        results, _ = repo.get_with_filters(db, user.id, HealthScoreQueryParams(), {}, {})
+
+        assert [score.id for score, _ in results] == [sourced.id]
+
     def test_paging_counts_the_picked_scores(self, db: Session, repo: HealthScoreRepository) -> None:
         user = UserFactory()
         garmin = DataSourceFactory(user=user, provider=ProviderName.GARMIN)

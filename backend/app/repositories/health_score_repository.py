@@ -54,6 +54,7 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
                     # UTC date: a bare cast follows the session time zone
                     partition_by=(HealthScore.category, cast(func.timezone("UTC", HealthScore.recorded_at), Date)),
                     order_by=(
+                        DataSource.id.is_(None),  # a score without a source comes last
                         *source_priority_order(provider_order, device_type_order),
                         # Longest sleep first, so an unflagged nap (#938) doesn't beat the night
                         desc(func.coalesce(SleepDetails.sleep_total_duration_minutes, 0)),
