@@ -28,7 +28,12 @@ def list_health_scores(
     limit: PageLimitQueryParam = DEFAULT_PAGE_SIZE,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PaginatedResponse[HealthScoreResponse]:
-    """Returns health scores (sleep, recovery, readiness, etc.) for a user."""
+    """Returns health scores (sleep, recovery, readiness, etc.) for a user.
+
+    OW scores (provider `internal`) are computed for each of the user's data sources; one per category
+    and day is returned, from the source ranked highest in the provider and device type priorities.
+    Scores reported by providers are returned as they are.
+    """
     params = HealthScoreQueryParams(
         start_datetime=parse_query_datetime(start_date) if start_date else None,
         end_datetime=parse_query_end_datetime(end_date) if end_date else None,
@@ -37,9 +42,7 @@ def list_health_scores(
         limit=limit,
         offset=offset,
     )
-    scores, total_count = health_score_service.get_scores_with_filters(db, user_id, params)
-
-    data = [HealthScoreResponse.model_validate(s) for s in scores]
+    data, total_count = health_score_service.get_scores_with_filters(db, user_id, params)
     has_more = (offset + len(data)) < total_count
 
     return PaginatedResponse(

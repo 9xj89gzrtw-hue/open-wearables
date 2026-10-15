@@ -3,7 +3,7 @@ from typing import Any
 from typing import cast as typing_cast
 from uuid import UUID
 
-from sqlalchemy import Date, and_, asc, cast, desc, func, select, tuple_
+from sqlalchemy import Date, and_, asc, cast, desc, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import DbSession
@@ -28,7 +28,14 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
         db_session: DbSession,
         user_id: UUID,
         params: HealthScoreQueryParams,
-    ) -> tuple[list[HealthScore], int]:
+        provider_order: dict[ProviderName, int],
+        device_type_order: dict[DeviceType, int],
+    ) -> tuple[list[tuple[HealthScore, DataSource | None]], int]:
+        """Scores matching the filters, newest first, each with the data source it came from.
+
+        OW scores (provider=internal) are cut to one per category and day, from the highest-priority
+        source, before paging. Provider scores come back as they are.
+        """
         filters = [HealthScore.user_id == user_id]
 
         if params.category:
@@ -42,11 +49,45 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
         if params.end_datetime:
             filters.append(HealthScore.recorded_at < params.end_datetime)
 
-        query = db_session.query(HealthScore).filter(and_(*filters))
+        # An OW score's own provider is always internal, so the rank comes from its source
+        ranked = (
+            select(
+                HealthScore.id,
+                func.row_number()
+                .over(
+                    partition_by=(HealthScore.category, cast(HealthScore.recorded_at, Date)),
+                    order_by=(
+                        *source_priority_order(provider_order, device_type_order),
+                        desc(HealthScore.recorded_at),
+                        HealthScore.id,
+                    ),
+                )
+                .label("source_rank"),
+            )
+            .outerjoin(DataSource, HealthScore.data_source_id == DataSource.id)
+            .where(*filters, HealthScore.provider == ProviderName.INTERNAL)
+            .subquery()
+        )
+        filters.append(
+            or_(
+                HealthScore.provider != ProviderName.INTERNAL,
+                HealthScore.id.in_(select(ranked.c.id).where(ranked.c.source_rank == 1)),
+            )
+        )
 
+        query = (
+            db_session.query(HealthScore, DataSource)
+            .outerjoin(DataSource, HealthScore.data_source_id == DataSource.id)
+            .filter(and_(*filters))
+        )
         total_count = query.count()
-        results = query.order_by(desc(HealthScore.recorded_at)).offset(params.offset).limit(params.limit).all()
-        return results, total_count
+        rows = (
+            query.order_by(desc(HealthScore.recorded_at), desc(HealthScore.id))
+            .offset(params.offset)
+            .limit(params.limit)
+            .all()
+        )
+        return [(score, data_source) for score, data_source in rows], total_count
 
     def bulk_create(self, db_session: DbSession, creators: list[HealthScoreCreate]) -> None:
         """Bulk insert health scores, doing nothing on conflict with the unique constraint."""
