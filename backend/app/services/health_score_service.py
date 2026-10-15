@@ -61,7 +61,7 @@ class HealthScoreService(
         user_id: UUID,
         params: HealthScoreQueryParams,
     ) -> tuple[list[HealthScoreResponse], int]:
-        """Scores with their source; OW scores cut to one per category and day by source priority."""
+        """Scores with their source, one OW score per category and day."""
         rows, total_count = self.crud.get_with_filters(
             db_session,
             user_id,

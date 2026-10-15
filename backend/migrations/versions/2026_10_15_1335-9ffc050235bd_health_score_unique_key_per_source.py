@@ -3,16 +3,12 @@
 Revision ID: 9ffc050235bd
 Revises: b679f6226f99
 
-A score with a data source (OW computes one per source) is unique per source, so two sources
-scored at the same time no longer collide. Scores without one (provider scores) keep the old key:
-NULLs are distinct in a unique index, so adding data_source_id to it would stop deduplicating them.
-
-downgrade restores the old constraint and fails if scores of two sources share a time by then.
+Adds data_source_id to the unique key, NULLS NOT DISTINCT so provider scores (no source) stay unique
+per provider. downgrade fails if two sources have a score at the same time by then.
 """
 
 from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -23,45 +19,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Concurrently, so building them on a large health_score does not block writes. The old
-    # constraint keeps rows unique until both indexes are in place. No if_not_exists: a failed
-    # concurrent build leaves an invalid index, which it would skip before the constraint is dropped.
+    # Built concurrently so writes aren't blocked, then promoted to the constraint
     with op.get_context().autocommit_block():
         op.create_index(
-            "uq_health_score_unsourced_time",
-            "health_score",
-            ["user_id", "provider", "category", "recorded_at"],
-            unique=True,
-            postgresql_where=sa.text("data_source_id IS NULL"),
-            postgresql_concurrently=True,
-        )
-        op.create_index(
-            "uq_health_score_source_time",
+            "uq_health_score_user_provider_source_category_time",
             "health_score",
             ["user_id", "provider", "data_source_id", "category", "recorded_at"],
             unique=True,
-            postgresql_where=sa.text("data_source_id IS NOT NULL"),
+            postgresql_nulls_not_distinct=True,
             postgresql_concurrently=True,
         )
     op.drop_constraint("uq_health_score_user_provider_category_time", "health_score", type_="unique")
+    op.execute(
+        "ALTER TABLE health_score ADD CONSTRAINT uq_health_score_user_provider_source_category_time "
+        "UNIQUE USING INDEX uq_health_score_user_provider_source_category_time"
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("uq_health_score_user_provider_source_category_time", "health_score", type_="unique")
     op.create_unique_constraint(
         "uq_health_score_user_provider_category_time",
         "health_score",
         ["user_id", "provider", "category", "recorded_at"],
     )
-    with op.get_context().autocommit_block():
-        op.drop_index(
-            "uq_health_score_source_time",
-            table_name="health_score",
-            postgresql_where=sa.text("data_source_id IS NOT NULL"),
-            postgresql_concurrently=True,
-        )
-        op.drop_index(
-            "uq_health_score_unsourced_time",
-            table_name="health_score",
-            postgresql_where=sa.text("data_source_id IS NULL"),
-            postgresql_concurrently=True,
-        )

@@ -30,9 +30,7 @@ def list_health_scores(
 ) -> PaginatedResponse[HealthScoreResponse]:
     """Returns health scores (sleep, recovery, readiness, etc.) for a user.
 
-    OW scores (provider `internal`) can be computed from several of the user's data sources; one per
-    category and day is returned, from the source ranked highest in the provider and device type priorities.
-    Scores reported by providers are returned as they are.
+    One OW score (provider `internal`) per category and day, from the highest-priority source.
     """
     params = HealthScoreQueryParams(
         start_datetime=parse_query_datetime(start_date) if start_date else None,

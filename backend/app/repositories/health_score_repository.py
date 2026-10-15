@@ -31,11 +31,7 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
         provider_order: dict[ProviderName, int],
         device_type_order: dict[DeviceType, int],
     ) -> tuple[list[tuple[HealthScore, DataSource | None]], int]:
-        """Scores matching the filters, newest first, each with the data source it came from.
-
-        OW scores (provider=internal) are cut to one per category and day, from the highest-priority
-        source, before paging. Provider scores come back as they are.
-        """
+        """Scores newest first, with their data source; one OW score per category and day, picked before paging."""
         filters = [HealthScore.user_id == user_id]
 
         if params.category:
@@ -49,18 +45,17 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
         if params.end_datetime:
             filters.append(HealthScore.recorded_at < params.end_datetime)
 
-        # An OW score's own provider is always internal, so the rank comes from its source
+        # Ranked by source: an OW score's own provider is always internal
         ranked = (
             select(
                 HealthScore.id,
                 func.row_number()
                 .over(
-                    # UTC date: a bare cast follows the session time zone, and a sleep score's
-                    # recorded_at is the local wake-up time labelled UTC
+                    # UTC date: a bare cast follows the session time zone
                     partition_by=(HealthScore.category, cast(func.timezone("UTC", HealthScore.recorded_at), Date)),
                     order_by=(
                         *source_priority_order(provider_order, device_type_order),
-                        # A source can score an unflagged nap besides the night (#938): the longest sleep wins
+                        # Longest sleep first, so an unflagged nap (#938) doesn't beat the night
                         desc(func.coalesce(SleepDetails.sleep_total_duration_minutes, 0)),
                         desc(HealthScore.recorded_at),
                         HealthScore.id,

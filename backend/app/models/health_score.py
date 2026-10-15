@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, text
+from sqlalchemy import ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import BaseDbModel
@@ -14,27 +14,15 @@ class HealthScore(BaseDbModel):
 
     __tablename__ = "health_score"
     __table_args__ = (
-        # OW computes a score per source, so a score with a data source is unique per source.
-        # Provider scores have none and keep the per-provider key: in a unique index NULLs are
-        # distinct, so one key with data_source_id would stop deduplicating them.
-        Index(
-            "uq_health_score_unsourced_time",
-            "user_id",
-            "provider",
-            "category",
-            "recorded_at",
-            unique=True,
-            postgresql_where=text("data_source_id IS NULL"),
-        ),
-        Index(
-            "uq_health_score_source_time",
+        # NULLS NOT DISTINCT keeps provider scores, which have no source, unique per provider
+        UniqueConstraint(
             "user_id",
             "provider",
             "data_source_id",
             "category",
             "recorded_at",
-            unique=True,
-            postgresql_where=text("data_source_id IS NOT NULL"),
+            name="uq_health_score_user_provider_source_category_time",
+            postgresql_nulls_not_distinct=True,
         ),
         # SQLAlchemy's UniqueConstraint doesn't support postgresql_where, so we
         # use Index(..., unique=True) to express this partial unique constraint.
