@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import HealthScore, ProviderPriority
@@ -22,7 +23,13 @@ from app.repositories import ProviderPriorityRepository
 from app.repositories.health_score_repository import HealthScoreRepository
 from app.schemas.enums import HealthScoreCategory, ProviderName
 from app.schemas.model_crud.activities import HealthScoreCreate, HealthScoreQueryParams
-from tests.factories import DataSourceFactory, HealthScoreFactory, UserFactory
+from tests.factories import (
+    DataSourceFactory,
+    EventRecordFactory,
+    HealthScoreFactory,
+    SleepDetailsFactory,
+    UserFactory,
+)
 
 
 @pytest.fixture
@@ -362,15 +369,40 @@ class TestHealthScoreRepositorySourcePriority:
 
         assert total == 2
 
-    def test_latest_part_of_a_split_night_wins(self, db: Session, repo: HealthScoreRepository) -> None:
+    def test_the_night_wins_over_an_unflagged_nap_of_the_same_source(
+        self, db: Session, repo: HealthScoreRepository
+    ) -> None:
+        """SDK naps can come without the nap flag (#938) and get a sleep score of their own."""
         user = UserFactory()
-        source = DataSourceFactory(user=user, provider=ProviderName.GARMIN)
-        self._ow(source, NIGHT - timedelta(hours=3))
-        last_part = self._ow(source, NIGHT)
+        source = DataSourceFactory(user=user, provider=ProviderName.APPLE)
+        scores = []
+        for wake_up, hours in ((NIGHT, 8), (NIGHT + timedelta(hours=8), 1)):
+            session = EventRecordFactory(
+                data_source=source,
+                category="sleep",
+                type="sleep",
+                start_datetime=wake_up - timedelta(hours=hours),
+                end_datetime=wake_up,
+                duration_seconds=hours * 3600,
+            )
+            SleepDetailsFactory(event_record=session, is_nap=False, sleep_total_duration_minutes=hours * 60 - 20)
+            scores.append(self._ow(source, wake_up, event_record_id=session.id))
 
         results, _ = repo.get_with_filters(db, user.id, HealthScoreQueryParams(), *_orders(db))
 
-        assert [score.id for score, _ in results] == [last_part.id]
+        assert [score.id for score, _ in results] == [scores[0].id]
+
+    def test_days_are_utc_dates_whatever_the_database_time_zone(self, db: Session, repo: HealthScoreRepository) -> None:
+        """01:00 UTC is still the previous evening in New York; it must not split the day."""
+        db.execute(text("SET LOCAL TIME ZONE 'America/New_York'"))
+        _prioritise(db, ProviderName.GARMIN, ProviderName.OURA)
+        user = UserFactory()
+        garmin = self._ow(DataSourceFactory(user=user, provider=ProviderName.GARMIN), NIGHT - timedelta(hours=6))
+        self._ow(DataSourceFactory(user=user, provider=ProviderName.OURA), NIGHT)
+
+        results, _ = repo.get_with_filters(db, user.id, HealthScoreQueryParams(), *_orders(db))
+
+        assert [score.id for score, _ in results] == [garmin.id]
 
     def test_provider_scores_are_returned_as_they_are(self, db: Session, repo: HealthScoreRepository) -> None:
         user = UserFactory()

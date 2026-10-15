@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.models import ProviderPriority
+from app.repositories import ProviderPriorityRepository
 from app.schemas.enums import HealthScoreCategory, ProviderName
 from tests.factories import ApiKeyFactory, DataSourceFactory, HealthScoreFactory, UserFactory
 from tests.utils import api_key_headers
@@ -20,6 +22,9 @@ from tests.utils import api_key_headers
 
 class TestHealthScoresEndpoint:
     def test_one_ow_score_per_day_with_its_source(self, client: TestClient, db: Session) -> None:
+        priorities = ProviderPriorityRepository(ProviderPriority)
+        priorities.upsert(db, ProviderName.GARMIN, 1)
+        priorities.upsert(db, ProviderName.OURA, 2)
         user = UserFactory()
         night = datetime(2026, 9, 24, 7, tzinfo=timezone.utc)
         garmin = DataSourceFactory(user=user, provider=ProviderName.GARMIN)
@@ -30,8 +35,7 @@ class TestHealthScoresEndpoint:
 
         picked = client.get(f"/api/v1/users/{user.id}/health-scores", headers=headers).json()
 
-        assert len(picked["data"]) == 1
-        assert picked["data"][0]["source"]["provider"] in ("garmin", "oura")
+        assert [score["source"]["provider"] for score in picked["data"]] == ["garmin"]
 
     def test_list_health_scores_success(self, client: TestClient, db: Session) -> None:
         user = UserFactory()

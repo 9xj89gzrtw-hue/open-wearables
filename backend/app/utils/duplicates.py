@@ -32,10 +32,10 @@ def _unique_keys(table: Table, violated: str | None) -> list[tuple[list[Column],
 def handle_duplicates(func: Callable[..., T]) -> Callable[..., T | None]:
     """
     Decorator that handles duplicate inserts by querying for existing records
-    based on unique constraints or primary keys.
+    based on unique constraints, unique indexes or primary keys.
 
-    When a unique constraint violation occurs, this decorator tries each unique
-    constraint sequentially until it finds the existing record that caused the violation.
+    When a unique violation occurs, this decorator looks the existing record up by the
+    constraint or index Postgres reports, or tries each of them when it reports none.
     """
 
     @wraps(func)

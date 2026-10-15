@@ -7,7 +7,7 @@ from sqlalchemy import Date, and_, asc, cast, desc, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import DbSession
-from app.models import DataSource, HealthScore
+from app.models import DataSource, HealthScore, SleepDetails
 from app.repositories.repositories import CrudRepository, source_priority_order
 from app.schemas.enums import DeviceType, HealthScoreCategory, ProviderName
 from app.schemas.model_crud.activities import HealthScoreCreate, HealthScoreQueryParams, HealthScoreUpdate
@@ -55,9 +55,13 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
                 HealthScore.id,
                 func.row_number()
                 .over(
-                    partition_by=(HealthScore.category, cast(HealthScore.recorded_at, Date)),
+                    # UTC date: a bare cast follows the session time zone, and a sleep score's
+                    # recorded_at is the local wake-up time labelled UTC
+                    partition_by=(HealthScore.category, cast(func.timezone("UTC", HealthScore.recorded_at), Date)),
                     order_by=(
                         *source_priority_order(provider_order, device_type_order),
+                        # A source can score an unflagged nap besides the night (#938): the longest sleep wins
+                        desc(func.coalesce(SleepDetails.sleep_total_duration_minutes, 0)),
                         desc(HealthScore.recorded_at),
                         HealthScore.id,
                     ),
@@ -65,6 +69,7 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
                 .label("source_rank"),
             )
             .outerjoin(DataSource, HealthScore.data_source_id == DataSource.id)
+            .outerjoin(SleepDetails, SleepDetails.record_id == HealthScore.event_record_id)
             .where(*filters, HealthScore.provider == ProviderName.INTERNAL)
             .subquery()
         )
