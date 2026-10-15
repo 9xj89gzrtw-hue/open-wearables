@@ -108,10 +108,18 @@ def test_divides_the_added_up_minutes_of_a_night_without_stages(db: Session) -> 
 
     dedupe_polar_sleep(db, dry_run=False)
 
-    stored, detail = _stored(db, record)
+    _, detail = _stored(db, record)
     assert detail.sleep_time_in_bed_minutes == SESSION_MINUTES
     assert {name: getattr(detail, name) for name in MINUTES} == MINUTES
-    assert stored.external_id is None
+
+
+def test_night_without_stages_is_keyed_by_the_utc_date_of_its_end(db: Session) -> None:
+    """Without stages there is no offset to read; in UTC+10 the 06:30 wake-up is still 23 September in UTC."""
+    record = _sleep(with_stages=False)
+
+    dedupe_polar_sleep(db, dry_run=False)
+
+    assert _stored(db, record)[0].external_id == "sleep-2026-09-23"
 
 
 def test_keys_the_night_by_its_local_wake_up_date(db: Session) -> None:

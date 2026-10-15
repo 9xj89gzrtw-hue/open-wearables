@@ -16,8 +16,9 @@ before that:
 - sets external_id to "sleep-<local wake-up date>", the date Polar keys the night by, so a
   later re-sync replaces the night instead of merging into it. zone_offset isn't stored for
   Polar sleep, so the local date uses the offset of the stage timestamps. A night without
-  stages has no offset to read and is left without an external_id; if it is still inside the
-  sync window, a re-sync can append to it again.
+  stages has no offset to read and gets the UTC date of its end: Polar's date, except where
+  the wake-up still falls on the previous UTC day (well east of UTC). There the ids differ, a
+  re-sync merges into the night as it did before, and nothing else reads the id.
 
 Not changed: internal sleep scores of the repaired nights, and stage timelines whose copies
 differ (Polar moved the night between syncs), which are not exact duplicates.
@@ -25,7 +26,7 @@ differ (Polar moved the night between syncs), which are not exact duplicates.
 Nights are read in batches and each batch is committed. A night whose data can't be read is
 skipped and reported, so one bad row doesn't stop the rest. A run that skipped a night isn't
 recorded, so the next startup tries again; repaired nights no longer match, so a retry reads
-only the skipped nights and those without stages.
+only the skipped ones.
 
 Idempotent: repaired nights no longer match, so re-runs are no-ops. Loading every Polar night
 to find there's nothing left is not free, so it runs once per instance through
@@ -37,7 +38,7 @@ Usage (inside Docker), with --dry-run to preview without changes:
 """
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from logging import getLogger
 from typing import Any
 
@@ -61,8 +62,8 @@ MINUTE_FIELDS = (
 )
 
 
-def _repaired_values(record: EventRecord, detail: SleepDetails) -> tuple[dict[str, Any], str | None]:
-    """The detail fields to overwrite and the external_id to set; empty / None when there is nothing to do."""
+def _repaired_values(record: EventRecord, detail: SleepDetails) -> tuple[dict[str, Any], str]:
+    """The detail fields to overwrite (empty when the night wasn't appended to) and the external_id to set."""
     # A night without stages can hold a JSON null rather than a list.
     stages = detail.sleep_stages if isinstance(detail.sleep_stages, list) else []
     session_minutes = int((record.end_datetime - record.start_datetime).total_seconds()) // 60
@@ -82,10 +83,10 @@ def _repaired_values(record: EventRecord, detail: SleepDetails) -> tuple[dict[st
                 if (value := getattr(detail, name)) is not None:
                     fields[name] = round(value / copies)
 
-    external_id = None
-    if stages and (offset := datetime.fromisoformat(stages[0]["start_time"]).tzinfo) is not None:
-        external_id = f"sleep-{record.end_datetime.astimezone(offset).date().isoformat()}"
-    return fields, external_id
+    # Without stages there is no local offset to read, so the end's UTC date stands in
+    offset = datetime.fromisoformat(stages[0]["start_time"]).tzinfo if stages else None
+    wake_up = record.end_datetime.astimezone(offset or timezone.utc)
+    return fields, f"sleep-{wake_up.date().isoformat()}"
 
 
 def dedupe_polar_sleep(db: Session, *, dry_run: bool, batch_size: int = BATCH_SIZE) -> dict[str, int]:
@@ -116,20 +117,17 @@ def dedupe_polar_sleep(db: Session, *, dry_run: bool, batch_size: int = BATCH_SI
                 fields, external_id = _repaired_values(record, detail)
             except (KeyError, TypeError, ValueError) as exc:
                 counts["sessions_skipped"] += 1
+                print(f"Skipped unreadable Polar sleep {record.id}")
                 log_and_capture_error(
-                    exc,
-                    logger,
-                    f"Skipped unreadable Polar sleep {record.id}",
-                    extra={"event_record_id": str(record.id)},
+                    exc, logger, "Skipped unreadable Polar sleep", extra={"event_record_id": str(record.id)}
                 )
                 continue
             counts["sessions_repaired"] += bool(fields)
-            counts["external_ids_set"] += external_id is not None
+            counts["external_ids_set"] += 1
             if not dry_run:
                 for name, value in fields.items():
                     setattr(detail, name, value)
-                if external_id is not None:
-                    record.external_id = external_id
+                record.external_id = external_id
 
         last_id = batch[-1][0].id
         if not dry_run:
