@@ -132,6 +132,11 @@ class TestPolar247SleepNormalization:
         user_id = uuid4()
         assert data_247.normalize_sleep([sample_sleep], user_id) == []
 
+    def test_missing_date_skipped(self, data_247: Polar247Data, sample_sleep: dict) -> None:
+        sample_sleep.pop("date")
+        user_id = uuid4()
+        assert data_247.normalize_sleep([sample_sleep], user_id) == []
+
     def test_empty_input(self, data_247: Polar247Data) -> None:
         assert data_247.normalize_sleep([], uuid4()) == []
 
