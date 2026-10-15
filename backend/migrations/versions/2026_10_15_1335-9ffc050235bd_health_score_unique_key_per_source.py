@@ -21,6 +21,13 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # Built concurrently so writes aren't blocked, then promoted to the constraint
     with op.get_context().autocommit_block():
+        # A failed earlier build leaves an invalid index behind; drop it so a retry rebuilds it
+        op.drop_index(
+            "uq_health_score_user_provider_source_category_time",
+            table_name="health_score",
+            postgresql_concurrently=True,
+            if_exists=True,
+        )
         op.create_index(
             "uq_health_score_user_provider_source_category_time",
             "health_score",

@@ -29,19 +29,29 @@ class TestHealthScoresEndpoint:
         night = datetime(2026, 9, 24, 7, tzinfo=timezone.utc)
         garmin = DataSourceFactory(user=user, provider=ProviderName.GARMIN)
         oura = DataSourceFactory(user=user, provider=ProviderName.OURA)
-        garmin_ow = HealthScoreFactory(data_source=garmin, provider=ProviderName.INTERNAL, recorded_at=night)
+        # Oura first, so the pick can't come from the order of writes
         HealthScoreFactory(data_source=oura, provider=ProviderName.INTERNAL, recorded_at=night)
+        garmin_ow = HealthScoreFactory(data_source=garmin, provider=ProviderName.INTERNAL, recorded_at=night)
         garmin_own = HealthScoreFactory(
             data_source_id=None, user_id=user.id, provider=ProviderName.GARMIN, recorded_at=night
+        )
+        # The next day only Oura has a score, so it is the one returned
+        oura_next_day = HealthScoreFactory(
+            data_source=oura, provider=ProviderName.INTERNAL, recorded_at=night + timedelta(days=1)
         )
         headers = api_key_headers(ApiKeyFactory().plain_key)
 
         picked = client.get(f"/api/v1/users/{user.id}/health-scores", headers=headers).json()["data"]
 
-        assert sorted(score["id"] for score in picked) == sorted([str(garmin_ow.id), str(garmin_own.id)])
-        assert {score["provider"]: (score["source"] or {}).get("provider") for score in picked} == {
-            "internal": "garmin",
-            "garmin": None,
+        assert sorted(score["id"] for score in picked) == sorted(
+            [str(garmin_ow.id), str(garmin_own.id), str(oura_next_day.id)]
+        )
+        assert {
+            (score["provider"], score["recorded_at"][:10], (score["source"] or {}).get("provider")) for score in picked
+        } == {
+            ("internal", "2026-09-24", "garmin"),
+            ("garmin", "2026-09-24", None),
+            ("internal", "2026-09-25", "oura"),
         }
 
     def test_list_health_scores_success(self, client: TestClient, db: Session) -> None:
