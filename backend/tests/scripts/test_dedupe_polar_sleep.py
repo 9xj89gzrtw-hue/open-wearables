@@ -27,7 +27,9 @@ def _load_module() -> ModuleType:
     return module
 
 
-dedupe_polar_sleep = _load_module().dedupe_polar_sleep
+_module = _load_module()
+dedupe_polar_sleep = _module.dedupe_polar_sleep
+migrate = _module._migrate
 
 # A night in UTC+10: the user wakes up on 24 September, which is still 23 September in UTC.
 TZ = timezone(timedelta(hours=10))
@@ -142,6 +144,18 @@ def test_skips_a_night_it_cannot_read_and_repairs_the_rest(db: Session) -> None:
     assert result == {"sessions_repaired": 1, "external_ids_set": 1, "sessions_skipped": 1}
     assert _stored(db, unreadable)[1].sleep_time_in_bed_minutes == 2 * SESSION_MINUTES
     assert _stored(db, readable)[1].sleep_time_in_bed_minutes == SESSION_MINUTES
+
+
+def test_run_with_a_skipped_night_is_not_recorded_as_done(db: Session) -> None:
+    _sleep(copies=2, stages=[{"stage": "light", "start_time": START.isoformat()}])
+
+    assert migrate(db, dry_run=False) is False
+
+
+def test_clean_run_is_recorded_as_done(db: Session) -> None:
+    _sleep(copies=2)
+
+    assert migrate(db, dry_run=False) is True
 
 
 def test_repairs_every_batch(db: Session) -> None:

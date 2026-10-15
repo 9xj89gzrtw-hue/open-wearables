@@ -23,7 +23,9 @@ Not changed: internal sleep scores of the repaired nights, and stage timelines w
 differ (Polar moved the night between syncs), which are not exact duplicates.
 
 Nights are read in batches and each batch is committed. A night whose data can't be read is
-skipped and reported, so one bad row doesn't stop the rest.
+skipped and reported, so one bad row doesn't stop the rest. A run that skipped a night isn't
+recorded, so the next startup tries again; repaired nights no longer match, so a retry reads
+only the skipped nights and those without stages.
 
 Idempotent: repaired nights no longer match, so re-runs are no-ops. Loading every Polar night
 to find there's nothing left is not free, so it runs once per instance through
@@ -36,6 +38,7 @@ Usage (inside Docker), with --dry-run to preview without changes:
 
 import argparse
 from datetime import datetime
+from logging import getLogger
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -44,6 +47,9 @@ from app.database import engine
 from app.models import DataSource, EventRecord, SleepDetails
 from app.schemas.enums import ProviderName
 from app.services.data_migration_service import data_migration_service
+from app.utils.sentry_helpers import log_and_capture_error
+
+logger = getLogger(__name__)
 
 BATCH_SIZE = 200
 MINUTE_FIELDS = (
@@ -110,7 +116,12 @@ def dedupe_polar_sleep(db: Session, *, dry_run: bool, batch_size: int = BATCH_SI
                 fields, external_id = _repaired_values(record, detail)
             except (KeyError, TypeError, ValueError) as exc:
                 counts["sessions_skipped"] += 1
-                print(f"Skipped Polar sleep {record.id}: {exc!r}")
+                log_and_capture_error(
+                    exc,
+                    logger,
+                    f"Skipped unreadable Polar sleep {record.id}",
+                    extra={"event_record_id": str(record.id)},
+                )
                 continue
             counts["sessions_repaired"] += bool(fields)
             counts["external_ids_set"] += external_id is not None
@@ -139,11 +150,12 @@ def dedupe_polar_sleep(db: Session, *, dry_run: bool, batch_size: int = BATCH_SI
 
 
 def _migrate(db: Session, dry_run: bool) -> bool:
-    dedupe_polar_sleep(db, dry_run=dry_run)
+    result = dedupe_polar_sleep(db, dry_run=dry_run)
     if dry_run:
         return False
-    print("Done.")
-    return True
+    if not result["sessions_skipped"]:
+        print("Done.")
+    return not result["sessions_skipped"]
 
 
 def main(dry_run: bool) -> None:
