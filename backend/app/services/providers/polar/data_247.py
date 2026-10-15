@@ -272,6 +272,7 @@ class Polar247Data(Base247DataTemplate):
                 duration_seconds=duration_seconds,
                 start_datetime=start_dt,
                 end_datetime=end_dt,
+                external_id=f"sleep-{parsed.date}",
                 provider=ProviderName.POLAR,
                 user_id=user_id,
             )
