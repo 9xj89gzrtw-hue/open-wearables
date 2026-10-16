@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import ProviderPriority
-from app.repositories import ProviderPriorityRepository
+from app.repositories import EventRecordRepository, ProviderPriorityRepository
 from app.schemas.enums import HealthScoreCategory, ProviderName
 from app.services.summaries_service import SummariesService
 from tests.factories import (
@@ -458,6 +458,26 @@ class TestSleepPagingPerDate:
             (night, "garmin") for night in self.NIGHTS[2:4]
         ]
         assert back.pagination.has_more is True
+
+    def test_loads_sessions_for_the_page_nights_only(
+        self, db: Session, service: SummariesService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        user = self._two_sources_per_night(db)
+        loaded: list[tuple[date, date]] = []
+        load = EventRecordRepository._get_sleep_sessions
+
+        def spy(repo: EventRecordRepository, db_session: Session, user_id: UUID, first: date, last: date) -> Any:
+            loaded.append((first, last))
+            return load(repo, db_session, user_id, first, last)
+
+        monkeypatch.setattr(EventRecordRepository, "_get_sleep_sessions", spy)
+        page = service.get_sleep_summaries(db, user.id, self.START, self.END, cursor=None, limit=2)
+
+        # The page's nights plus the one read to tell whether there is more, not the whole range
+        assert loaded == [(self.NIGHTS[0], self.NIGHTS[2])]
+        assert [[s.end_time.date() for s in summary.sessions or []] for summary in page.data] == [
+            [night] for night in self.NIGHTS[:2]
+        ]
 
 
 # ---------------------------------------------------------------------------
