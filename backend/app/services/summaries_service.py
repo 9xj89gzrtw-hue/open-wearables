@@ -6,7 +6,8 @@ from datetime import date, datetime, timedelta, timezone
 from logging import Logger, getLogger
 from uuid import UUID
 
-from app.constants.sleep import SleepStageType
+from app.algorithms.config_algorithms import sleep_config
+from app.algorithms.sleep import awakenings
 from app.database import DbSession
 from app.models import DataPointSeries, EventRecord, HealthScore, ProviderPriority, User
 from app.repositories import EventRecordRepository, ProviderPriorityRepository
@@ -88,11 +89,6 @@ BODY_AVERAGED_SERIES = [
 DEFAULT_AVERAGE_PERIOD_DAYS = 7
 DEFAULT_LATEST_WINDOW_HOURS = 4
 
-# Sleep interruption constants
-MIN_INTERRUPTION_MINUTES = 5  # Shorter awake blocks are brief arousals, not interruptions
-# Stages that open and close the sleep period; in_bed and unknown don't
-SLEEP_STAGES = frozenset({SleepStageType.SLEEPING, SleepStageType.LIGHT, SleepStageType.DEEP, SleepStageType.REM})
-
 
 def _midnight(day: date) -> datetime:
     """A calendar date as the UTC midnight that starts it."""
@@ -104,36 +100,20 @@ def _activity_key(row: dict) -> tuple:
     return (row["activity_date"], row["source"] or "", row.get("device_model") or "")
 
 
-def _session_interruptions(stages: list[SleepStage]) -> int:
-    """Awakenings longer than MIN_INTERRUPTION_MINUTES between falling asleep and the final wake-up.
-
-    Back-to-back awake blocks count as one awakening.
-    """
-    stages = sorted(stages, key=lambda stage: stage.start_time)
-    asleep = [i for i, stage in enumerate(stages) if stage.stage in SLEEP_STAGES]
-    if not asleep:
-        return 0
-    awakenings: list[float] = []  # seconds awake per awakening
-    awake_until: datetime | None = None
-    for stage in stages[asleep[0] : asleep[-1] + 1]:
-        if stage.stage != SleepStageType.AWAKE:
-            awake_until = None
-            continue
-        seconds = (stage.end_time - stage.start_time).total_seconds()
-        if stage.start_time == awake_until:
-            awakenings[-1] += seconds
-        else:
-            awakenings.append(seconds)
-        awake_until = stage.end_time
-    return sum(1 for seconds in awakenings if seconds > MIN_INTERRUPTION_MINUTES * 60)
-
-
 def _interruptions_count(sessions: list[dict]) -> int | None:
-    """Interruptions in the day's main sleep; None without main sleep or when a main session has no timeline."""
+    """Awakenings in the day's main sleep longer than the sleep score's threshold.
+
+    None without main sleep or when a main session has no timeline.
+    """
     main_sessions = [s for s in sessions if not s["is_nap"]]
     if not main_sessions or any(not s["sleep_stages"] for s in main_sessions):
         return None
-    return sum(_session_interruptions([SleepStage(**stage) for stage in s["sleep_stages"]]) for s in main_sessions)
+    return sum(
+        1
+        for session in main_sessions
+        for minutes in awakenings([SleepStage(**stage) for stage in session["sleep_stages"]])
+        if minutes > sleep_config.significant_wake_threshold_mins
+    )
 
 
 class SummariesService:
