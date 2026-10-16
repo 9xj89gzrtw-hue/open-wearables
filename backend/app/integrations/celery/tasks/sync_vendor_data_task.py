@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from celery import shared_task
 
 from app.config import settings
+from app.constants.celery_tasks import CeleryTask
 from app.database import SessionLocal
 from app.repositories.provider_settings_repository import ProviderSettingsRepository
 from app.repositories.user_connection_repository import UserConnectionRepository
@@ -106,7 +107,7 @@ def _task_outcomes(task: str, count: Any) -> list[DataTypeOutcome]:
     ]
 
 
-@shared_task
+@shared_task(name=CeleryTask.SYNC_VENDOR_DATA)
 def sync_vendor_data(
     user_id: str,
     start_date: str | None = None,

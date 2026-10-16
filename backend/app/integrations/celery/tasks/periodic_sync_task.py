@@ -2,6 +2,7 @@ from logging import getLogger
 
 from celery import shared_task
 
+from app.constants.celery_tasks import CeleryTask
 from app.database import SessionLocal
 from app.integrations.celery.tasks.sync_vendor_data_task import sync_vendor_data
 from app.repositories.user_connection_repository import UserConnectionRepository
@@ -12,7 +13,7 @@ from app.utils.structured_logging import log_structured
 logger = getLogger(__name__)
 
 
-@shared_task
+@shared_task(name=CeleryTask.SYNC_ALL_USERS)
 def sync_all_users(
     start_date: str | None = None,
     end_date: str | None = None,
