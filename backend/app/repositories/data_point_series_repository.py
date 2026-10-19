@@ -771,16 +771,18 @@ class DataPointSeriesRepository(
         db_session: DbSession,
         user_id: UUID,
         source: str,
+        device_model: str | None,
         start_datetime: datetime,
         end_datetime: datetime,
     ) -> bool:
-        """Whether any sample from `source` exists for the user in [start, end)."""
+        """Whether any sample from `source` and `device_model` exists for the user in [start, end)."""
         query = (
             db_session.query(self.model.id)
             .join(DataSource, self.model.data_source_id == DataSource.id)
             .filter(
                 DataSource.user_id == user_id,
                 DataSource.source == source,
+                DataSource.device_model.is_(None) if device_model is None else DataSource.device_model == device_model,
                 self.model.recorded_at >= start_datetime,
                 self.model.recorded_at < end_datetime,
             )

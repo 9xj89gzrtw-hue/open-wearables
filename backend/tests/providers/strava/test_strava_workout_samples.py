@@ -305,6 +305,7 @@ class TestIngestionWiring:
             db,
             user_id,
             "strava",
+            _SAMPLE_ACTIVITY.device_name or None,
             record_mock.start_datetime,
             record_mock.end_datetime,
         )
