@@ -92,12 +92,11 @@ class TestRetryTask:
     def _run(self, activity_data: dict | None, attempt: int = 1) -> MagicMock:
         mock_workouts = MagicMock()
         mock_workouts.get_workout_detail_from_api.return_value = activity_data
-        mock_strategy = MagicMock(workouts=mock_workouts)
         with (
-            patch("app.integrations.celery.tasks.strava_stream_retry_task.ProviderFactory") as mock_factory,
+            patch("app.integrations.celery.tasks.strava_stream_retry_task.StravaStrategy") as mock_strategy,
             patch("app.integrations.celery.tasks.strava_stream_retry_task.SessionLocal"),
         ):
-            mock_factory.return_value.get_provider.return_value = mock_strategy
+            mock_strategy.return_value.workouts = mock_workouts
             retry_strava_stream_ingest(str(uuid4()), str(_ACTIVITY.id), attempt=attempt)
         return mock_workouts
 

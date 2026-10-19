@@ -9,7 +9,7 @@ from app.config import settings
 from app.constants.celery_tasks import CeleryTask
 from app.database import DbSession, SessionLocal
 from app.schemas.providers.strava import ActivityJSON as StravaActivityJSON
-from app.services.providers.factory import ProviderFactory
+from app.services.providers.strava.strategy import StravaStrategy
 from app.services.providers.strava.workouts import schedule_stream_retry
 from app.utils.sentry_helpers import log_and_capture_error
 from app.utils.structured_logging import log_structured
@@ -23,6 +23,8 @@ def retry_strava_stream_ingest(user_id: str, activity_id: str, attempt: int = 1)
     try:
         with SessionLocal() as db:
             _retry_ingest(db, UUID(user_id), str(activity_id), attempt)
+            # Bulk sample writes defer their commit to the caller.
+            db.commit()
     except Exception as e:
         # Transient failures keep the chain going until the attempt budget runs out.
         log_and_capture_error(e, logger, "Strava stream retry failed", extra={"activity_id": activity_id})
@@ -31,7 +33,7 @@ def retry_strava_stream_ingest(user_id: str, activity_id: str, attempt: int = 1)
 
 
 def _retry_ingest(db: DbSession, user_uuid: UUID, activity_id: str, attempt: int) -> None:
-    workouts = ProviderFactory().get_provider("strava").workouts
+    workouts = StravaStrategy().workouts
     activity_data = workouts.get_workout_detail_from_api(db, user_uuid, activity_id)
     if not activity_data:
         log_structured(

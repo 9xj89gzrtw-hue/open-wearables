@@ -457,8 +457,10 @@ class StravaWorkouts(BaseWorkoutsTemplate):
 
         record, detail = self._normalize_workout(activity, user_id)
         created_record = event_record_service.create(db, record)
-        detail_for_record = detail.model_copy(update={"record_id": created_record.id})
-        event_record_service.create_detail(db, detail_for_record)
+        # Retries re-run this flow; skip the detail (and its workout webhook) when it already exists.
+        if event_record_service.event_record_detail_repo.get_by_record_id(db, created_record.id, "workout") is None:
+            detail_for_record = detail.model_copy(update={"record_id": created_record.id})
+            event_record_service.create_detail(db, detail_for_record)
         created_ids.append(created_record.id)
         ingested = self._ingest_workout_streams(db, activity, user_id, record)
 
