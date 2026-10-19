@@ -1,12 +1,4 @@
-"""Tests for the delayed Strava stream-ingestion retry.
-
-Covers the race where the activity webhook fires before Strava finishes
-processing streams: the immediate fetch returns empty, and a delayed retry
-must be scheduled. The retry task re-runs the regular webhook flow
-(get_workout_detail_from_api + process_push_activity), which re-schedules
-with backoff until samples land or the configured attempt budget
-(len(settings.strava_stream_retry_countdown_seconds)) is exhausted.
-"""
+"""Tests for the delayed Strava stream re-fetch when the webhook beats stream processing."""
 
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -14,13 +6,9 @@ from uuid import uuid4
 import pytest
 
 from app.config import settings
-from app.integrations.celery.tasks.strava_stream_retry_task import (
-    max_stream_retry_attempts,
-    retry_strava_stream_ingest,
-    schedule_stream_retry,
-)
+from app.integrations.celery.tasks.strava_stream_retry_task import retry_strava_stream_ingest
 from app.schemas.providers.strava import ActivityJSON as StravaActivityJSON
-from app.services.providers.strava.workouts import StravaWorkouts
+from app.services.providers.strava.workouts import StravaWorkouts, schedule_stream_retry
 
 _ACTIVITY = StravaActivityJSON(
     id=19769960003,
@@ -61,10 +49,11 @@ class TestWebhookSchedulesRetry:
                 "app.services.providers.strava.workouts.timeseries_service.has_samples_in_range",
                 return_value=has_samples,
             ),
-            patch("app.integrations.celery.tasks.strava_stream_retry_task.schedule_stream_retry") as mock_schedule,
+            patch("app.services.providers.strava.workouts.schedule_stream_retry") as mock_schedule,
             patch("app.services.providers.strava.workouts.settings") as mock_settings,
         ):
             mock_settings.ingest_workout_samples = True
+            mock_settings.strava_stream_retry_max_attempts = settings.strava_stream_retry_max_attempts
             mock_service.create.return_value = MagicMock(id=uuid4())
             workouts.process_push_activity(
                 db=MagicMock(), activity=_ACTIVITY, user_id=user_id, stream_retry_attempt=attempt
@@ -92,7 +81,7 @@ class TestWebhookSchedulesRetry:
         mock_schedule.assert_not_called()
 
     def test_gives_up_after_attempt_budget(self, workouts: StravaWorkouts) -> None:
-        exhausted = max_stream_retry_attempts() + 1
+        exhausted = settings.strava_stream_retry_max_attempts + 1
         mock_schedule = self._process(workouts, ingested=0, has_samples=False, attempt=exhausted)
         mock_schedule.assert_not_called()
 
@@ -105,7 +94,7 @@ class TestRetryTask:
         mock_workouts.get_workout_detail_from_api.return_value = activity_data
         mock_strategy = MagicMock(workouts=mock_workouts)
         with (
-            patch("app.services.providers.factory.ProviderFactory") as mock_factory,
+            patch("app.integrations.celery.tasks.strava_stream_retry_task.ProviderFactory") as mock_factory,
             patch("app.integrations.celery.tasks.strava_stream_retry_task.SessionLocal"),
         ):
             mock_factory.return_value.get_provider.return_value = mock_strategy
@@ -143,20 +132,14 @@ class TestTransientFailureReschedule:
         assert mock_schedule.call_args.args[2] == 2
 
     def test_task_gives_up_on_transient_error_at_budget(self) -> None:
-        mock_schedule = self._run_with_error(attempt=max_stream_retry_attempts())
+        mock_schedule = self._run_with_error(attempt=settings.strava_stream_retry_max_attempts)
         mock_schedule.assert_not_called()
 
 
 class TestScheduleStreamRetry:
     def test_uses_configured_backoff_per_attempt(self) -> None:
-        countdowns = settings.strava_stream_retry_countdown_seconds
-        with patch(
-            "app.integrations.celery.tasks.strava_stream_retry_task.retry_strava_stream_ingest.apply_async"
-        ) as mock_apply:
+        with patch("app.services.providers.strava.workouts.celery_app.send_task") as mock_send:
             schedule_stream_retry("u-1", "a-1", attempt=2)
-        kwargs = mock_apply.call_args.kwargs
-        assert kwargs["countdown"] == countdowns[1]
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs["countdown"] == settings.strava_stream_retry_base_delay_seconds * 3
         assert kwargs["kwargs"]["attempt"] == 2
-
-    def test_budget_matches_countdown_list(self) -> None:
-        assert max_stream_retry_attempts() == len(settings.strava_stream_retry_countdown_seconds)

@@ -1,9 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from logging import getLogger
 from typing import Any
 from uuid import UUID, uuid4
 
+from celery import current_app as celery_app
+
 from app.config import settings
+from app.constants.celery_tasks import CeleryTask
 from app.constants.entry_source import get_unified_strava_entry_source
 from app.constants.workout_types import get_unified_strava_workout_type
 from app.database import DbSession
@@ -28,6 +32,8 @@ from app.utils.conversion import kilojoules_to_kcal
 from app.utils.dates import offset_to_iso
 from app.utils.sentry_helpers import log_and_capture_error
 from app.utils.structured_logging import log_structured
+
+logger = getLogger(__name__)
 
 
 class StravaWorkouts(BaseWorkoutsTemplate):
@@ -442,9 +448,7 @@ class StravaWorkouts(BaseWorkoutsTemplate):
             db: Database session
             activity: Parsed Strava activity data
             user_id: Internal user ID (already mapped from Strava athlete ID)
-            stream_retry_attempt: which delayed stream-ingest attempt to schedule
-                if streams are still empty (1 on the webhook path; the retry task
-                passes attempt+1 so the backoff chain terminates)
+            stream_retry_attempt: Retry attempt to schedule if streams are still empty
 
         Returns:
             List of created event record IDs
@@ -458,29 +462,16 @@ class StravaWorkouts(BaseWorkoutsTemplate):
         created_ids.append(created_record.id)
         ingested = self._ingest_workout_streams(db, activity, user_id, record)
 
-        # Strava's webhook typically fires seconds after upload, before their
-        # stream processing finishes — the immediate fetch above then returns
-        # empty and, because the webhook bumps last_synced_at past the
-        # activity's start, the periodic pull never re-covers the workout.
-        # Schedule a delayed retry so the samples land once Strava is done.
+        # The webhook often beats Strava's stream processing and the pull won't re-cover it, so retry later.
         if (
             ingested == 0
             and settings.ingest_workout_samples
             and record.end_datetime is not None
             and not timeseries_service.has_samples_in_range(
-                db, user_id, "strava", record.start_datetime, record.end_datetime
+                db, user_id, "strava", activity.device_name or None, record.start_datetime, record.end_datetime
             )
         ):
-            # Imported lazily: importing any module under the celery tasks package
-            # triggers tasks/__init__, which imports tasks that import the provider
-            # factory — and the factory imports this module (same pattern as
-            # outgoing_webhooks/events._dispatch).
-            from app.integrations.celery.tasks.strava_stream_retry_task import (
-                max_stream_retry_attempts,
-                schedule_stream_retry,
-            )
-
-            if stream_retry_attempt <= max_stream_retry_attempts():
+            if stream_retry_attempt <= settings.strava_stream_retry_max_attempts:
                 schedule_stream_retry(str(user_id), str(activity.id), attempt=stream_retry_attempt)
             else:
                 log_structured(
@@ -493,3 +484,23 @@ class StravaWorkouts(BaseWorkoutsTemplate):
                 )
 
         return created_ids
+
+
+def schedule_stream_retry(user_id: str, activity_id: str, attempt: int) -> None:
+    """Schedule stream re-fetch attempt N, delayed by base * 3^(N-1) seconds."""
+    countdown = settings.strava_stream_retry_base_delay_seconds * 3 ** (attempt - 1)
+    celery_app.send_task(
+        CeleryTask.RETRY_STRAVA_STREAM_INGEST,
+        kwargs={"user_id": user_id, "activity_id": activity_id, "attempt": attempt},
+        countdown=countdown,
+    )
+    log_structured(
+        logger,
+        "info",
+        "Strava streams not ready; scheduled delayed ingest",
+        provider="strava",
+        action="stream_retry_scheduled",
+        activity_id=activity_id,
+        attempt=attempt,
+        countdown_seconds=countdown,
+    )
