@@ -247,9 +247,9 @@ class OuraWebhookHandler(BaseWebhookHandler):
             object_id=notification.object_id,
         )
 
-        self.connection_repo.update_last_synced_at(db, connection)
-
         count = self._dispatch_data_type(db, notification, user_id, trace_id)
+        # Only reached when the fetch succeeded: fetch errors propagate out of the dispatch.
+        self.connection_repo.update_last_synced_at(db, connection)
 
         if count is None:
             log_structured(
