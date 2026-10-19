@@ -101,7 +101,7 @@ HealthKit has no sleep session object, only stage samples, so Open Wearables bui
    - a night uploaded later than that as soon as it arrives.
 
    Due sessions are closed every 5 minutes (`SLEEP_SYNC_INTERVAL_SECONDS`). A piece that arrives after its night was closed is merged into it.
-3. The OW sleep score follows within about 10 minutes.
+3. With OW scores on (`OW_SCORES_ENABLED`, the default), the OW sleep score follows within about 10 minutes.
 
 An Apple Watch night is usually available 15 to 20 minutes after it reaches Open Wearables, which can be hours after waking up.
 

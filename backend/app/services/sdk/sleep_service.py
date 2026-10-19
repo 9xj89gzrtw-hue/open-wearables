@@ -108,12 +108,11 @@ def _as_utc(moment: datetime) -> datetime:
 
 
 def is_ready_to_finish(state: SleepState, now: datetime) -> bool:
-    """Check if the sleep session ended, or for an Apple Watch if its uploads stopped."""
+    """Check if the sleep session ended, or if it holds Apple Watch sleep and its uploads stopped."""
     if now - _as_utc(state.end_time) >= timedelta(minutes=settings.sleep_end_gap_minutes):
         return True
     return (
-        is_apple_own_source(state.source_app_id)
-        and state.device_type == DeviceType.WATCH
+        state.has_apple_watch_sleep
         and state.last_received_at is not None
         and now - _as_utc(state.last_received_at) >= timedelta(minutes=settings.sleep_upload_quiet_minutes)
     )
@@ -210,6 +209,8 @@ def _apply_transition(
         state.zone_offset = zone_offset
     if device_type and not state.device_type and (source_name or "unknown") == state.source_name:
         state.device_type = device_type
+    if device_type == DeviceType.WATCH and is_apple_own_source(source_app_id):
+        state.has_apple_watch_sleep = True
 
     duration_seconds = (end_time - start_time).total_seconds()
 
@@ -321,6 +322,7 @@ def handle_sleep_data(
                 seen.add(key_tuple)
                 unique_data.append(item)
 
+        received_sleep = False
         for sjson in unique_data:
             # Extract device info
             device_model, software_version, original_source_name = extract_device_info(sjson.source)
@@ -367,6 +369,7 @@ def handle_sleep_data(
                 source_app_id,
                 device_manufacturer,
             )
+            received_sleep = True
 
             sleep_score = _extract_sleep_score(sjson.values)
             # The state is per user, so it may belong to another provider's open session
@@ -376,7 +379,8 @@ def handle_sleep_data(
         # Persist the accumulated state to Redis only once after processing the entire batch
         now = datetime.now(timezone.utc)
         if current_state:
-            current_state.last_received_at = now
+            if received_sleep:
+                current_state.last_received_at = now
             save_sleep_state(user_id, current_state)
 
         # Finalise synchronously if the session is already stale.  Historical

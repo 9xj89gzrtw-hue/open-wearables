@@ -183,6 +183,7 @@ class TestFinalizeStaleSleepsTask:
             last_start_timestamp=woke_up - timedelta(minutes=10),
             last_end_timestamp=woke_up,
             last_received_at=now - timedelta(minutes=20),
+            has_apple_watch_sleep=True,
         )
         mock_load_state.return_value = mock_sleep_state
 
