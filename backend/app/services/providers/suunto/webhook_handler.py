@@ -201,7 +201,7 @@ class SuuntoWebhookHandler(BaseWebhookHandler):
             )
             result["status"] = "unknown_event_type"
 
-        if result.get("status") != "error":
+        if result.get("status") in ("saved", "ignored"):
             self.connection_repo.update_last_synced_at(db, connection)
         db.commit()
 

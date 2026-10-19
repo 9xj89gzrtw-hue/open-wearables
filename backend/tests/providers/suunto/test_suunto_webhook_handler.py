@@ -12,6 +12,8 @@ Bugs fixed:
    optional with a `startTime + totalTime` fallback in `_normalize_workout`.
 """
 
+from datetime import datetime, timedelta, timezone
+from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -271,6 +273,53 @@ class TestFindConnection:
 
         assert user_id == "suunto-runner"
         assert handler.find_connection(db, user_id) == connection
+
+
+class TestProcessPayloadLastSyncedAt:
+    """last_synced_at moves only when the event was fetched from the Suunto API."""
+
+    USERNAME = "suunto-runner"
+
+    @pytest.fixture
+    def handler(self) -> SuuntoWebhookHandler:
+        return SuuntoWebhookHandler(suunto_workouts=MagicMock(), suunto_247=MagicMock())
+
+    def _connection(self) -> Any:
+        return UserConnectionFactory(
+            provider="suunto",
+            provider_username=self.USERNAME,
+            last_synced_at=datetime.now(timezone.utc) - timedelta(days=3),
+        )
+
+    @pytest.mark.parametrize(
+        ("event_type", "expected_status"),
+        [("ROUTE_CREATED", "skipped"), ("SOMETHING_NEW", "unknown_event_type")],
+    )
+    def test_unprocessed_event_keeps_last_synced_at(
+        self, db: Session, handler: SuuntoWebhookHandler, event_type: str, expected_status: str
+    ) -> None:
+        connection = self._connection()
+        before = connection.last_synced_at
+
+        result = handler.process_payload(db, {"type": event_type, "username": self.USERNAME}, TRACE_ID)
+        db.refresh(connection)
+
+        assert result["status"] == expected_status
+        assert connection.last_synced_at == before
+
+    def test_saved_workout_updates_last_synced_at(
+        self, db: Session, handler: SuuntoWebhookHandler, live_response: dict
+    ) -> None:
+        connection = self._connection()
+        before = connection.last_synced_at
+        handler.suunto_workouts.get_workout_detail.return_value = live_response
+
+        payload = {"type": "WORKOUT_CREATED", "username": self.USERNAME, "workout": {"workoutKey": WORKOUT_KEY}}
+        result = handler.process_payload(db, payload, TRACE_ID)
+        db.refresh(connection)
+
+        assert result["status"] == "saved"
+        assert connection.last_synced_at > before
 
 
 class TestProcessWorkoutPayloadShapes:

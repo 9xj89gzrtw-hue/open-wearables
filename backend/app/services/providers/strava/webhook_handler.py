@@ -272,7 +272,7 @@ class StravaWebhookHandler(BaseWebhookHandler):
         user_id: UUID = connection.user_id
 
         result = self._handle_activity_event(db, aspect_type, user_id, object_id, owner_id, trace_id)
-        if result.get("status") != "error":
+        if aspect_type in ("create", "update") and result.get("status") != "error":
             self.connection_repo.update_last_synced_at(db, connection)
         return result
 
