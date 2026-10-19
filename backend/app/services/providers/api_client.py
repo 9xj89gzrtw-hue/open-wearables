@@ -84,6 +84,9 @@ def get_valid_token(
             # Expired with nothing to refresh it with: the grant is dead, so revoke it like a
             # rejected refresh token (stops retries, emits connection.revoked).
             if not connection.refresh_token:
+                # Inside the refresh buffer but not yet expired: keep using the token until it dies.
+                if connection.token_expires_at > now:
+                    return connection.access_token
                 if revoke_on_failure:
                     oauth.revoke_connection(db, user_id, reason="no_refresh_token")
                 raise ReauthRequiredError(
