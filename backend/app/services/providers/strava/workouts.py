@@ -433,6 +433,8 @@ class StravaWorkouts(BaseWorkoutsTemplate):
         db: DbSession,
         activity: StravaActivityJSON,
         user_id: UUID,
+        *,
+        stream_retry_attempt: int = 1,
     ) -> list[UUID]:
         """Process a single activity from webhook and save to database.
 
@@ -440,6 +442,9 @@ class StravaWorkouts(BaseWorkoutsTemplate):
             db: Database session
             activity: Parsed Strava activity data
             user_id: Internal user ID (already mapped from Strava athlete ID)
+            stream_retry_attempt: which delayed stream-ingest attempt to schedule
+                if streams are still empty (1 on the webhook path; the retry task
+                passes attempt+1 so the backoff chain terminates)
 
         Returns:
             List of created event record IDs
@@ -451,6 +456,40 @@ class StravaWorkouts(BaseWorkoutsTemplate):
         detail_for_record = detail.model_copy(update={"record_id": created_record.id})
         event_record_service.create_detail(db, detail_for_record)
         created_ids.append(created_record.id)
-        self._ingest_workout_streams(db, activity, user_id, record)
+        ingested = self._ingest_workout_streams(db, activity, user_id, record)
+
+        # Strava's webhook typically fires seconds after upload, before their
+        # stream processing finishes — the immediate fetch above then returns
+        # empty and, because the webhook bumps last_synced_at past the
+        # activity's start, the periodic pull never re-covers the workout.
+        # Schedule a delayed retry so the samples land once Strava is done.
+        if (
+            ingested == 0
+            and settings.ingest_workout_samples
+            and record.end_datetime is not None
+            and not timeseries_service.has_samples_in_range(
+                db, user_id, "strava", record.start_datetime, record.end_datetime
+            )
+        ):
+            # Imported lazily: importing any module under the celery tasks package
+            # triggers tasks/__init__, which imports tasks that import the provider
+            # factory — and the factory imports this module (same pattern as
+            # outgoing_webhooks/events._dispatch).
+            from app.integrations.celery.tasks.strava_stream_retry_task import (
+                max_stream_retry_attempts,
+                schedule_stream_retry,
+            )
+
+            if stream_retry_attempt <= max_stream_retry_attempts():
+                schedule_stream_retry(str(user_id), str(activity.id), attempt=stream_retry_attempt)
+            else:
+                log_structured(
+                    self.logger,
+                    "warning",
+                    "Strava streams still empty after final retry, giving up",
+                    provider="strava",
+                    action="stream_retry_exhausted",
+                    activity_id=str(activity.id),
+                )
 
         return created_ids
