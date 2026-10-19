@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -108,7 +108,7 @@ def oauth_callback(
 
     # Stamp last_synced_at=now so the first periodic sync uses the connection
     # timestamp as its live-sync cursor and won't attempt to pull all history.
-    user_connection_service.stamp_last_synced_at(db, oauth_state.user_id, provider_name.value)
+    previous_synced_at = user_connection_service.stamp_last_synced_at(db, oauth_state.user_id, provider_name.value)
 
     # Grace-period flag: automatically kick off a historical sync so integrators
     # who haven't yet adopted the explicit /sync/historical call still get backfill.
@@ -119,10 +119,12 @@ def oauth_callback(
             start_garmin_full_backfill.delay(str(oauth_state.user_id))
         elif caps.rest_pull:
             now = datetime.now(timezone.utc)
-            start_date = (now - timedelta(days=90)).isoformat()
+            start_date = user_connection_service.historical_start_on_connect(
+                db, oauth_state.user_id, provider_name.value, previous_synced_at, days=90
+            )
             sync_vendor_data.delay(
                 user_id=str(oauth_state.user_id),
-                start_date=start_date,
+                start_date=start_date.isoformat(),
                 end_date=now.isoformat(),
                 providers=[provider_name.value],
                 is_historical=True,
