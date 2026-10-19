@@ -113,14 +113,12 @@ class Settings(BaseSettings):
 
     # Time between sleep phases to conclude end of sleep session
     sleep_end_gap_minutes: int = 120  # 2 hours
-    # An Apple Watch writes a whole night to HealthKit after waking, so its session closes
-    # this long after the last upload with its sleep instead of waiting for the end gap
+    # Time without uploads to conclude end of Apple Watch sleep session
     sleep_upload_quiet_minutes: int = 15
 
     # SYNC SETTINGS
     sync_interval_seconds: int = 3600  # Default: 1 hour (3600 seconds)
-    # How often finalize_stale_sleeps closes the SDK sleep sessions that are due
-    sleep_sync_interval_seconds: int = 300  # Default: 5 minutes
+    sleep_sync_interval_seconds: int = 300  # Default: 5 minutes (300 seconds)
     # Re-fetch a trailing window on each *live* pull sync so late provider revisions
     # (e.g. Oura finalising a day's step count after we already moved past it) are
     # picked up. Disabled by default. Set via a compact duration string: "2d", "20h",

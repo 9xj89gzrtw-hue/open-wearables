@@ -738,7 +738,7 @@ class TestNoIntermediateRedisSaves:
 
 
 class TestReadyToFinish:
-    """A session closes after the end gap, or, for an Apple Watch, after a quiet period in its uploads."""
+    """A session closes after the end gap, and an Apple Watch one also once its uploads stop."""
 
     NOW = _dt("2026-04-18T09:00:00Z")
 
@@ -749,7 +749,6 @@ class TestReadyToFinish:
         app: str = "com.apple.health.FA11388E",
         device_type: DeviceType = DeviceType.WATCH,
     ) -> SleepState:
-        """A seven-hour session that ended and was last uploaded the given minutes before NOW."""
         end = self.NOW - timedelta(minutes=ended_ago)
         return SleepState(
             uuid=str(uuid4()),
@@ -775,11 +774,9 @@ class TestReadyToFinish:
         assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=5), self.NOW)
 
     def test_other_writers_wait_for_the_end_gap(self) -> None:
-        """Apps writing to HealthKit can send a night over several syncs hours apart."""
         assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=30, app="com.ouraring.oura"), self.NOW)
 
     def test_an_iphone_session_waits_for_the_end_gap(self) -> None:
-        """The iPhone's own in-bed samples are not a watch night written at once."""
         state = self._state(ended_ago=40, received_ago=30, device_type=DeviceType.PHONE)
         assert not is_ready_to_finish(state, self.NOW)
 

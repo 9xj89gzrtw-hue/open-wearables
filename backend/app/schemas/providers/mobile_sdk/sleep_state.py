@@ -31,8 +31,6 @@ class SleepState(BaseModel):
 
     last_start_timestamp: datetime
     last_end_timestamp: datetime
-    # When the last upload with this session's sleep was processed (wall clock, not sample time).
-    # None in states saved before the field existed.
     last_received_at: datetime | None = None
 
     in_bed_seconds: float = 0

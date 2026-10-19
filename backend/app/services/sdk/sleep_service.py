@@ -108,13 +108,7 @@ def _as_utc(moment: datetime) -> datetime:
 
 
 def is_ready_to_finish(state: SleepState, now: datetime) -> bool:
-    """Whether an open session can be closed.
-
-    Its last sleep ended at least ``sleep_end_gap_minutes`` ago, or it was recorded by an Apple
-    Watch and no upload with its sleep came for ``sleep_upload_quiet_minutes``: the watch writes
-    the whole night after waking and the SDK sends it in one sync. A piece arriving later is
-    merged into the stored night by ``finish_sleep``.
-    """
+    """Check if the sleep session ended, or for an Apple Watch if its uploads stopped."""
     if now - _as_utc(state.end_time) >= timedelta(minutes=settings.sleep_end_gap_minutes):
         return True
     return (
@@ -278,7 +272,7 @@ def handle_sleep_data(
     of overwriting each other's state.
 
     Stale detection uses ``end_time`` (the last sleep-sample timestamp), and for an Apple
-    Watch also the time of the last upload (see ``is_ready_to_finish``).  When a bulk
+    Watch also ``last_received_at``.  When a bulk
     historical upload finalizes a session whose ``end_time`` is in the past, the new
     session is merged with any adjacent record already in the database, so consecutive
     payloads within the same night are combined into a single session rather than being
