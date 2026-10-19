@@ -16,11 +16,11 @@ from fastapi import HTTPException
 
 from app.constants.celery_tasks import CeleryTask
 from app.database import SessionLocal
-from app.repositories import UserConnectionRepository
 from app.schemas.sync_status import SyncStatus
 from app.services import sync_status_service
 from app.services.providers.factory import ProviderFactory
 from app.services.providers.sync_247_result import error_code_of
+from app.services.providers.templates.base_webhook_handler import BaseWebhookHandler
 from app.utils.exceptions import ReauthRequiredError
 from app.utils.structured_logging import log_structured
 
@@ -72,13 +72,15 @@ def _extract_breakdown(result: dict[str, Any], count: Any) -> dict[str, int] | N
     return {"inserted": inserted or 0, "updated": updated or 0}
 
 
-def _emit_final_failure(provider_name: str, provider_user_id: str | None, exc: Exception) -> None:
+def _emit_final_failure(
+    provider_name: str, handler: BaseWebhookHandler | None, provider_user_id: str | None, exc: Exception
+) -> None:
     """Record a delivery that ran out of retries as FAILED"""
-    if not provider_user_id:
+    if handler is None or not provider_user_id:
         return
     try:
         with SessionLocal() as db:
-            connection = UserConnectionRepository().get_by_provider_user_id(db, provider_name, str(provider_user_id))
+            connection = handler.find_connection(db, str(provider_user_id))
         if connection:
             _emit_webhook_sync_status(
                 provider_name,
@@ -240,7 +242,7 @@ def process_webhook_push(
             max_retries=self.max_retries,
         )
         if self.request.retries >= self.max_retries:
-            _emit_final_failure(provider_name, provider_user_id, exc)
+            _emit_final_failure(provider_name, handler, provider_user_id, exc)
         raise self.retry(exc=exc)
     except Exception as exc:
         log_structured(
@@ -255,5 +257,5 @@ def process_webhook_push(
             max_retries=self.max_retries,
         )
         if self.request.retries >= self.max_retries:
-            _emit_final_failure(provider_name, provider_user_id, exc)
+            _emit_final_failure(provider_name, handler, provider_user_id, exc)
         raise self.retry(exc=exc)

@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.models import EventRecord
 from app.repositories.event_record_repository import EventRecordRepository
@@ -25,6 +26,7 @@ from app.schemas.providers.suunto.workout_import import WorkoutJSON as SuuntoWor
 from app.services.providers.suunto.oauth import SuuntoOAuth
 from app.services.providers.suunto.webhook_handler import SuuntoWebhookHandler
 from app.services.providers.suunto.workouts import SuuntoWorkouts
+from tests.factories import UserConnectionFactory, UserFactory
 
 WORKOUT_KEY = "test-workout-key-0001"
 PAUSED_WORKOUT_KEY = "test-paused-workout-0001"
@@ -251,6 +253,24 @@ def paused_workout_payload() -> dict:
         "cadence": {"max": 110, "avg": 62},
         "workoutKey": PAUSED_WORKOUT_KEY,
     }
+
+
+class TestFindConnection:
+    """The id from ``extract_user_id`` is the payload username, not the JWT ``sub``."""
+
+    def test_resolves_by_username_not_provider_user_id(self, db: Session) -> None:
+        handler = SuuntoWebhookHandler(suunto_workouts=MagicMock(), suunto_247=MagicMock())
+        connection = UserConnectionFactory(
+            user=UserFactory(),
+            provider="suunto",
+            provider_user_id="suunto-sub-123",
+            provider_username="suunto-runner",
+        )
+
+        user_id = handler.extract_user_id({"username": "suunto-runner"})
+
+        assert user_id == "suunto-runner"
+        assert handler.find_connection(db, user_id) == connection
 
 
 class TestProcessWorkoutPayloadShapes:

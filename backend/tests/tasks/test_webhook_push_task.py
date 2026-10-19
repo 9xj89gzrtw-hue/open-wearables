@@ -9,7 +9,7 @@ deliveries with no resolvable user (or from self-reporting Garmin) are dropped.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -132,11 +132,10 @@ def test_failed_run_logged_only_when_retries_run_out(retries: int, expect_failed
     handler = MagicMock()
     handler.extract_user_id.return_value = "athlete-1"
     handler.process_payload.side_effect = RuntimeError("upstream timeout")
-    connection = MagicMock(user_id=UUID(user_id))
+    handler.find_connection.return_value = MagicMock(user_id=UUID(user_id))
     with (
         patch.object(task, "SessionLocal"),
         patch.object(task, "ProviderFactory") as factory,
-        patch.object(task.UserConnectionRepository, "get_by_provider_user_id", return_value=connection),
         patch.object(task.process_webhook_push, "retry", side_effect=RuntimeError("retry")),
         patch.object(task.sync_status_service, "emit_webhook_delivered", side_effect=fake),
     ):
@@ -149,6 +148,7 @@ def test_failed_run_logged_only_when_retries_run_out(retries: int, expect_failed
             task.process_webhook_push.pop_request()
 
     if expect_failed:
+        handler.find_connection.assert_called_once_with(ANY, "athlete-1")
         assert calls[0]["status"] == SyncStatus.FAILED
         assert calls[0]["error"] == "RuntimeError"
     else:
