@@ -10,6 +10,7 @@ from celery import current_app as celery_app
 
 from app.config import settings
 from app.constants.celery_tasks import CeleryTask
+from app.constants.devices_map.device_types import is_apple_own_source
 from app.constants.series_types.sdk import (
     SleepPhase,
     get_apple_sleep_phase,
@@ -100,6 +101,28 @@ def save_sleep_state(user_id: str, state: SleepState) -> None:
 def delete_sleep_state(user_id: str) -> None:
     get_redis_client().delete(key(user_id))
     get_redis_client().srem(active_users_key(), user_id)
+
+
+def _as_utc(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def is_ready_to_finish(state: SleepState, now: datetime) -> bool:
+    """Whether an open session can be closed.
+
+    Its last sleep ended at least ``sleep_end_gap_minutes`` ago, or it was recorded by an Apple
+    Watch and no upload with its sleep came for ``sleep_upload_quiet_minutes``: the watch writes
+    the whole night after waking and the SDK sends it in one sync. A piece arriving later is
+    merged into the stored night by ``finish_sleep``.
+    """
+    if now - _as_utc(state.end_time) >= timedelta(minutes=settings.sleep_end_gap_minutes):
+        return True
+    return (
+        is_apple_own_source(state.source_app_id)
+        and state.device_type == DeviceType.WATCH
+        and state.last_received_at is not None
+        and now - _as_utc(state.last_received_at) >= timedelta(minutes=settings.sleep_upload_quiet_minutes)
+    )
 
 
 def _create_new_sleep_state(
@@ -254,7 +277,8 @@ def handle_sleep_data(
     (e.g. from a bulk historical upload) accumulate stages into the same session instead
     of overwriting each other's state.
 
-    Stale detection uses ``end_time`` (the last sleep-sample timestamp).  When a bulk
+    Stale detection uses ``end_time`` (the last sleep-sample timestamp), and for an Apple
+    Watch also the time of the last upload (see ``is_ready_to_finish``).  When a bulk
     historical upload finalizes a session whose ``end_time`` is in the past, the new
     session is merged with any adjacent record already in the database, so consecutive
     payloads within the same night are combined into a single session rather than being
@@ -356,7 +380,9 @@ def handle_sleep_data(
                 current_state.sleep_score = sleep_score
 
         # Persist the accumulated state to Redis only once after processing the entire batch
+        now = datetime.now(timezone.utc)
         if current_state:
+            current_state.last_received_at = now
             save_sleep_state(user_id, current_state)
 
         # Finalise synchronously if the session is already stale.  Historical
@@ -364,12 +390,8 @@ def handle_sleep_data(
         # finish_sleep now merges the result with any adjacent record already in
         # the DB — so each payload extends the growing record rather than
         # creating a separate session.
-        if current_state:
-            session_end = current_state.end_time
-            if session_end.tzinfo is None:
-                session_end = session_end.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) - session_end >= timedelta(minutes=settings.sleep_end_gap_minutes):
-                finish_sleep(db_session, user_id, current_state)
+        if current_state and is_ready_to_finish(current_state, now):
+            finish_sleep(db_session, user_id, current_state)
 
     finally:
         with contextlib.suppress(Exception):

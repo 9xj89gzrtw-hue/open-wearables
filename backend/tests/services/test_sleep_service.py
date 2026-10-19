@@ -9,7 +9,7 @@ Apple Watch sleep data patterns:
 - Newer Apple Watch (watchOS 9+): "in_bed", "awake", "light", "deep", "rem" stages
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.constants.sleep import SleepStageType
 from app.models import EventRecord, HealthScore
-from app.schemas.enums import HealthScoreCategory, ProviderName
+from app.schemas.enums import DeviceType, HealthScoreCategory, ProviderName
 from app.schemas.model_crud.activities import (
     EventRecordCreate,
     EventRecordDetailCreate,
@@ -32,6 +32,7 @@ from app.services.sdk.sleep_service import (
     _calculate_final_metrics,
     finish_sleep,
     handle_sleep_data,
+    is_ready_to_finish,
 )
 from tests.factories import UserFactory
 
@@ -734,6 +735,75 @@ class TestNoIntermediateRedisSaves:
         state = SleepState.model_validate_json(set_calls[0][0][1])
         # The payload has 9 stages; in_bed is included but counted under in_bed_seconds
         assert len(state.stages) >= 8  # at least the 8 watch stages + 1 in_bed
+
+
+class TestReadyToFinish:
+    """A session closes after the end gap, or, for an Apple Watch, after a quiet period in its uploads."""
+
+    NOW = _dt("2026-04-18T09:00:00Z")
+
+    def _state(
+        self,
+        ended_ago: int,
+        received_ago: int | None,
+        app: str = "com.apple.health.FA11388E",
+        device_type: DeviceType = DeviceType.WATCH,
+    ) -> SleepState:
+        """A seven-hour session that ended and was last uploaded the given minutes before NOW."""
+        end = self.NOW - timedelta(minutes=ended_ago)
+        return SleepState(
+            uuid=str(uuid4()),
+            source_name="Apple Watch",
+            device_model="Watch7,1",
+            device_type=device_type,
+            source_app_id=app,
+            provider="apple",
+            start_time=end - timedelta(hours=7),
+            end_time=end,
+            last_start_timestamp=end - timedelta(minutes=10),
+            last_end_timestamp=end,
+            last_received_at=None if received_ago is None else self.NOW - timedelta(minutes=received_ago),
+        )
+
+    def test_any_session_closes_after_the_end_gap(self) -> None:
+        assert is_ready_to_finish(self._state(ended_ago=120, received_ago=0, app="com.ouraring.oura"), self.NOW)
+
+    def test_an_apple_watch_session_closes_after_a_quiet_period(self) -> None:
+        assert is_ready_to_finish(self._state(ended_ago=40, received_ago=15), self.NOW)
+
+    def test_an_apple_watch_session_stays_open_while_uploads_arrive(self) -> None:
+        assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=5), self.NOW)
+
+    def test_other_writers_wait_for_the_end_gap(self) -> None:
+        """Apps writing to HealthKit can send a night over several syncs hours apart."""
+        assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=30, app="com.ouraring.oura"), self.NOW)
+
+    def test_an_iphone_session_waits_for_the_end_gap(self) -> None:
+        """The iPhone's own in-bed samples are not a watch night written at once."""
+        state = self._state(ended_ago=40, received_ago=30, device_type=DeviceType.PHONE)
+        assert not is_ready_to_finish(state, self.NOW)
+
+    def test_a_state_without_an_upload_time_waits_for_the_end_gap(self) -> None:
+        assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=None), self.NOW)
+
+    @patch("app.services.sdk.sleep_service.celery_app")
+    @patch("app.services.sdk.sleep_service.event_record_service")
+    @patch("app.services.sdk.sleep_service.get_redis_client")
+    def test_an_upload_records_when_it_arrived(
+        self, mock_redis_func: MagicMock, mock_event_service: MagicMock, mock_finalize: MagicMock, db: Session
+    ) -> None:
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+        mock_redis_func.return_value = mock_redis
+        mock_event_service.create.return_value = MagicMock(id=uuid4())
+        mock_event_service.find_adjacent_sleep_record.return_value = None
+        before = datetime.now(timezone.utc)
+
+        handle_sleep_data(db, SyncRequest.model_validate(DETAILED_STAGES_PAYLOAD), str(uuid4()))
+
+        saved = SleepState.model_validate_json(mock_redis.set.call_args[0][1])
+        assert saved.last_received_at is not None
+        assert saved.last_received_at >= before
 
 
 class TestHistoricalBulkUploadMerging:
