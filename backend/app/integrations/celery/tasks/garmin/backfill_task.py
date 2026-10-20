@@ -41,7 +41,6 @@ from app.services.providers.garmin.backfill_state import (
     get_retry_targets,
     get_total_windows,
     get_trace_id,
-    get_window_date_range,
     init_window_state,
     is_retry_phase,
     mark_type_failed,
@@ -63,7 +62,7 @@ from app.services.sync_status_service import (
     emit_sync_completed,
     emit_sync_progress,
     emit_sync_started,
-    last_backfill_requested_at,
+    last_backfill_requested_until,
 )
 from app.utils.structured_logging import log_structured
 
@@ -162,13 +161,15 @@ def start_full_backfill(user_id: str, since: str | None = None) -> dict[str, Any
             return {"status": "skipped", "reason": "HISTORICAL_DATA_EXPORT permission not granted"}
 
         # Garmin rejects a range it was already asked for with a 409 and sends nothing, so a reconnect
-        # requests only the gap, starting after the last backfill's window (+1s for second truncation).
+        # requests only the gap, starting after the last accepted backfill window (+1s for second truncation).
         start = None
         if since is not None:
             start = datetime.fromisoformat(since)
-            requested_at = last_backfill_requested_at(db, UUID(user_id), "garmin")
-            if requested_at is not None:
-                start = max(start, requested_at + timedelta(seconds=1))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            requested_until = last_backfill_requested_until(db, UUID(user_id), "garmin")
+            if requested_until is not None:
+                start = max(start, requested_until + timedelta(seconds=1))
             if start >= datetime.now(timezone.utc):
                 return {"status": "skipped", "reason": "No gap since the last backfill"}
 
@@ -319,7 +320,6 @@ def start_full_backfill(user_id: str, since: str | None = None) -> dict[str, Any
 
     # Fresh start
     init_window_state(user_id, total_windows=BACKFILL_WINDOW_COUNT, start=start)
-    window_start, window_end = get_window_date_range(user_id)
 
     log_structured(
         logger,
@@ -340,8 +340,6 @@ def start_full_backfill(user_id: str, since: str | None = None) -> dict[str, Any
         run_id=f"garmin_backfill_{user_id}_{trace_id}",
         scope=SyncScope.HISTORICAL,
         message=f"Starting Garmin {MAX_BACKFILL_DAYS}-day historical backfill",
-        window_start=window_start,
-        window_end=window_end,
         metadata={
             "trace_id": trace_id,
             "total_types": len(BACKFILL_DATA_TYPES),

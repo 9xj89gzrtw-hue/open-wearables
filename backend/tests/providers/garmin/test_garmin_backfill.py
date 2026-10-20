@@ -354,6 +354,7 @@ class TestBackfillTaskStopChain:
             patch(f"{self.TASK_MODULE}.celery_app") as mock_celery,
             patch(f"{self.TASK_MODULE}.get_redis_client", return_value=mock_redis),
             patch(f"{self.TASK_MODULE}.UserConnectionRepository") as mock_conn_repo_cls,
+            patch(f"{self.TASK_MODULE}.record_requested_window") as mock_record_window,
         ):
             # Setup DB session context manager
             mock_db = MagicMock()
@@ -374,6 +375,7 @@ class TestBackfillTaskStopChain:
                 "result": result,
                 "mock_mark_failed": shared_mark_failed,
                 "mock_send_task": mock_celery.send_task,
+                "mock_record_window": mock_record_window,
             }
 
     def _run_task_with_status(self, status_code: int, detail: str) -> dict:
@@ -381,6 +383,21 @@ class TestBackfillTaskStopChain:
         return self._run_task(
             side_effect=HTTPException(status_code=status_code, detail=detail),
         )
+
+    def test_accepted_request_records_the_window(self) -> None:
+        ctx = self._run_task(return_value={"triggered": ["sleeps"], "duplicate": [], "failed": {}})
+
+        assert ctx["result"]["status"] == "triggered"
+        run_id = ctx["mock_record_window"].call_args.args[0]
+        assert run_id == f"garmin_backfill_{self.USER_ID}_test-trace"
+
+    def test_rejected_request_records_no_window(self) -> None:
+        ctx = self._run_task(
+            return_value={"triggered": [], "duplicate": [], "failed": {"sleeps": "boom"}, "failed_status_codes": {}}
+        )
+
+        assert ctx["result"]["status"] == "failed"
+        ctx["mock_record_window"].assert_not_called()
 
     def test_412_stops_chain_and_fails_pending_types(self) -> None:
         """412 should stop the chain and mark all pending types as failed."""
@@ -511,7 +528,7 @@ class TestReconnectGapBackfill:
         with (
             patch(f"{self.TASK_MODULE}.SessionLocal"),
             patch(f"{self.TASK_MODULE}.UserConnectionRepository") as repo_cls,
-            patch(f"{self.TASK_MODULE}.last_backfill_requested_at", return_value=requested_at),
+            patch(f"{self.TASK_MODULE}.last_backfill_requested_until", return_value=requested_at),
             patch(f"{self.TASK_MODULE}.acquire_backfill_lock", return_value=True),
             patch(f"{self.TASK_MODULE}.get_current_window", return_value=0),
             patch(f"{self.TASK_MODULE}.init_window_state") as init,
@@ -536,6 +553,13 @@ class TestReconnectGapBackfill:
         since = now - timedelta(days=1)
 
         _, init = self._start(since=since, requested_at=now - timedelta(days=2))
+
+        assert init.call_args.kwargs["start"] == since
+
+    def test_naive_since_is_read_as_utc(self) -> None:
+        since = datetime.now(timezone.utc) - timedelta(days=1)
+
+        _, init = self._start(since=since.replace(tzinfo=None), requested_at=since - timedelta(days=1))
 
         assert init.call_args.kwargs["start"] == since
 

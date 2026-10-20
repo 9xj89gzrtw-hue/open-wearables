@@ -28,8 +28,9 @@ from app.schemas.sync_status import (
     SyncStatusEvent,
 )
 from app.services.sync_status_service import (
-    last_backfill_requested_at,
+    last_backfill_requested_until,
     list_stored_runs,
+    record_requested_window,
     try_persist_run,
     try_record_data_types,
 )
@@ -399,19 +400,26 @@ class TestListStoredRunsFilters:
         assert [r.run_key for r in runs] == ["pull_garmin"]
 
     @patch("app.services.sync_status_service.SessionLocal")
-    def test_last_backfill_requested_at_ignores_other_sources_and_providers(
+    def test_backfill_requested_until_counts_only_accepted_windows(
         self, mock_session_local: MagicMock, db: Session
     ) -> None:
+        """A run that opened but never had a request accepted must not hide its range."""
         mock_session_local.return_value.__enter__.return_value = db
         user = UserFactory()
         now = datetime.now(timezone.utc)
         backfill = {"provider": "garmin", "source": SyncSource.BACKFILL}
-        try_persist_run(_event(user.id, run_id="old", started_at=now - timedelta(days=9), **backfill))
-        try_persist_run(_event(user.id, run_id="latest", started_at=now - timedelta(days=2), **backfill))
-        try_persist_run(_event(user.id, run_id="pull", provider="garmin", started_at=now))
-        try_persist_run(_event(user.id, run_id="oura", provider="oura", source=SyncSource.BACKFILL, started_at=now))
+        for run_id, extra in [
+            ("accepted", backfill),
+            ("rejected", backfill),
+            ("pull", {"provider": "garmin"}),
+            ("oura", {"provider": "oura", "source": SyncSource.BACKFILL}),
+        ]:
+            try_persist_run(_event(user.id, run_id=run_id, **extra))
+        record_requested_window("accepted", now - timedelta(days=9), now - timedelta(days=2))
+        record_requested_window("pull", now - timedelta(days=1), now)
+        record_requested_window("oura", now - timedelta(days=1), now)
 
-        assert last_backfill_requested_at(db, user.id, "garmin") == now - timedelta(days=2)
+        assert last_backfill_requested_until(db, user.id, "garmin") == now - timedelta(days=2)
 
     @patch("app.services.sync_status_service.SessionLocal")
     def test_covered_range_matches_the_window_not_the_run_time(
