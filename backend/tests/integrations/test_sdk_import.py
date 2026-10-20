@@ -812,7 +812,7 @@ class TestSDKImportUnitConversion:
         metric_type: str,
     ) -> None:
         """Moderate and vigorous minutes are both exercise_time, taken from the record's length, not its value."""
-        record = self._record(metric_type, 1500, unit="s") | {
+        record = self._record(metric_type, 999, unit="s") | {
             "startDate": "2025-04-10T10:00:00Z",
             "endDate": "2025-04-10T10:25:00Z",
         }
