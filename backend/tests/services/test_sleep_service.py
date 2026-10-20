@@ -738,13 +738,16 @@ class TestNoIntermediateRedisSaves:
 
 
 class TestReadyToFinish:
-    """A session closes after the end gap, and one with Apple Watch sleep also once its uploads stop."""
+    """A session closes after the end gap, and one with only Apple Watch and iPhone sleep also once uploads stop."""
 
     NOW = _dt("2026-04-18T09:00:00Z")
     WATCH = {"appId": "com.apple.health.FA11388E", "deviceType": "watch", "deviceModel": "Watch7,1"}
     IPHONE = {"appId": "com.apple.health.81F2A6D0", "deviceType": "phone", "deviceModel": "iPhone15,2"}
+    OURA = {"appId": "com.ouraring.oura", "deviceType": "phone", "deviceModel": "iPhone15,2"}
 
-    def _state(self, ended_ago: int, received_ago: int | None, watch_sleep: bool = True) -> SleepState:
+    def _state(
+        self, ended_ago: int, received_ago: int | None, watch_sleep: bool = True, third_party_sleep: bool = False
+    ) -> SleepState:
         end = self.NOW - timedelta(minutes=ended_ago)
         return SleepState(
             uuid=str(uuid4()),
@@ -756,25 +759,30 @@ class TestReadyToFinish:
             last_end_timestamp=end,
             last_received_at=None if received_ago is None else self.NOW - timedelta(minutes=received_ago),
             has_apple_watch_sleep=watch_sleep,
+            has_third_party_sleep=third_party_sleep,
+        )
+
+    def _payload(self, samples: list[tuple[str, str, str, dict]]) -> SyncRequest:
+        """One upload of (stage, start, end, source) samples."""
+        return SyncRequest.model_validate(
+            {
+                "provider": "apple",
+                "sdkVersion": "0.15.0",
+                "syncTimestamp": "2026-04-18T08:00:00Z",
+                "data": {
+                    "sleep": [
+                        {"id": str(uuid4()), "stage": stage, "startDate": start, "endDate": end, "source": source}
+                        for stage, start, end, source in samples
+                    ]
+                },
+            }
         )
 
     def _upload(self, mock_redis_func: MagicMock, samples: list[tuple[str, str, str, dict]]) -> SleepState:
-        """Handle one upload of (stage, start, end, source) samples and return the state it saved."""
-        mock_redis = mock_redis_func.return_value
-        payload = {
-            "provider": "apple",
-            "sdkVersion": "0.15.0",
-            "syncTimestamp": "2026-04-18T08:00:00Z",
-            "data": {
-                "sleep": [
-                    {"id": str(uuid4()), "stage": stage, "startDate": start, "endDate": end, "source": source}
-                    for stage, start, end, source in samples
-                ]
-            },
-        }
+        """Handle one upload and return the state it saved."""
         with patch("app.services.sdk.sleep_service.finish_sleep"), patch("app.services.sdk.sleep_service.celery_app"):
-            handle_sleep_data(MagicMock(), SyncRequest.model_validate(payload), str(uuid4()))
-        return SleepState.model_validate_json(mock_redis.set.call_args[0][1])
+            handle_sleep_data(MagicMock(), self._payload(samples), str(uuid4()))
+        return SleepState.model_validate_json(mock_redis_func.return_value.set.call_args[0][1])
 
     def test_any_session_closes_after_the_end_gap(self) -> None:
         assert is_ready_to_finish(self._state(ended_ago=120, received_ago=0, watch_sleep=False), self.NOW)
@@ -788,6 +796,10 @@ class TestReadyToFinish:
     def test_a_session_without_apple_watch_sleep_waits_for_the_end_gap(self) -> None:
         assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=30, watch_sleep=False), self.NOW)
 
+    def test_a_session_with_sleep_from_other_apps_waits_for_the_end_gap(self) -> None:
+        """Apps writing to HealthKit can send a night over several syncs hours apart."""
+        assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=30, third_party_sleep=True), self.NOW)
+
     def test_a_state_without_an_upload_time_waits_for_the_end_gap(self) -> None:
         assert not is_ready_to_finish(self._state(ended_ago=40, received_ago=None), self.NOW)
 
@@ -800,6 +812,21 @@ class TestReadyToFinish:
 
         assert saved.last_received_at is not None
         assert saved.last_received_at >= before
+
+    @patch("app.services.sdk.sleep_service.celery_app")
+    @patch("app.services.sdk.sleep_service.finish_sleep")
+    @patch("app.services.sdk.sleep_service.get_redis_client")
+    def test_a_fresh_watch_upload_stays_open(
+        self, mock_redis_func: MagicMock, mock_finish_sleep: MagicMock, mock_finalize: MagicMock
+    ) -> None:
+        """The quiet period starts at the upload, so the night is not closed in the same call."""
+        mock_redis_func.return_value.get.return_value = None
+        woke_up = datetime.now(timezone.utc) - timedelta(minutes=10)
+        sample = ("light", (woke_up - timedelta(hours=1)).isoformat(), woke_up.isoformat(), self.WATCH)
+
+        handle_sleep_data(MagicMock(), self._payload([sample]), str(uuid4()))
+
+        mock_finish_sleep.assert_not_called()
 
     @patch("app.services.sdk.sleep_service.get_redis_client")
     def test_watch_sleep_counts_in_a_session_the_iphone_opened(self, mock_redis_func: MagicMock) -> None:
@@ -815,6 +842,22 @@ class TestReadyToFinish:
 
         assert saved.device_type == DeviceType.PHONE
         assert saved.has_apple_watch_sleep
+        assert not saved.has_third_party_sleep
+
+    @patch("app.services.sdk.sleep_service.get_redis_client")
+    def test_sleep_from_another_app_is_marked_in_a_watch_session(self, mock_redis_func: MagicMock) -> None:
+        mock_redis_func.return_value.get.return_value = None
+
+        saved = self._upload(
+            mock_redis_func,
+            [
+                ("light", "2026-04-18T01:00:00Z", "2026-04-18T02:00:00Z", self.WATCH),
+                ("light", "2026-04-18T01:05:00Z", "2026-04-18T02:00:00Z", self.OURA),
+            ],
+        )
+
+        assert saved.has_apple_watch_sleep
+        assert saved.has_third_party_sleep
 
     @patch("app.services.sdk.sleep_service.get_redis_client")
     def test_an_upload_without_usable_sleep_keeps_the_upload_time(self, mock_redis_func: MagicMock) -> None:

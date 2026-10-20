@@ -108,11 +108,12 @@ def _as_utc(moment: datetime) -> datetime:
 
 
 def is_ready_to_finish(state: SleepState, now: datetime) -> bool:
-    """Check if the sleep session ended, or if it holds Apple Watch sleep and its uploads stopped."""
+    """Check if the sleep session ended, or if it holds Apple Watch sleep, none from other apps, and uploads stopped."""
     if now - _as_utc(state.end_time) >= timedelta(minutes=settings.sleep_end_gap_minutes):
         return True
     return (
         state.has_apple_watch_sleep
+        and not state.has_third_party_sleep
         and state.last_received_at is not None
         and now - _as_utc(state.last_received_at) >= timedelta(minutes=settings.sleep_upload_quiet_minutes)
     )
@@ -209,7 +210,9 @@ def _apply_transition(
         state.zone_offset = zone_offset
     if device_type and not state.device_type and (source_name or "unknown") == state.source_name:
         state.device_type = device_type
-    if device_type == DeviceType.WATCH and is_apple_own_source(source_app_id):
+    if not is_apple_own_source(source_app_id):
+        state.has_third_party_sleep = True
+    elif device_type == DeviceType.WATCH:
         state.has_apple_watch_sleep = True
 
     duration_seconds = (end_time - start_time).total_seconds()
