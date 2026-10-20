@@ -2,9 +2,11 @@
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from fastapi import HTTPException
 
+from app.integrations.celery.tasks.garmin.backfill_task import start_full_backfill
 from app.integrations.celery.tasks.garmin.backfill_trigger import trigger_backfill_for_type
 from app.services.providers.garmin.backfill_config import (
     ALL_DATA_TYPES,
@@ -17,6 +19,11 @@ from app.services.providers.garmin.backfill_config import (
     MAX_REQUEST_DAYS,
     REQUEST_DELAY_SECONDS,
     SUMMARY_DAYS,
+)
+from app.services.providers.garmin.backfill_state import (
+    get_window_date_range,
+    get_window_date_range_for_index,
+    init_window_state,
 )
 from app.services.providers.garmin.handlers.backfill import GarminBackfillService
 
@@ -474,3 +481,68 @@ class TestBackfillTaskStopChain:
 
         # Should trigger next type
         ctx["mock_send_task"].assert_called_once()
+
+
+class TestReconnectGapBackfill:
+    """A reconnect requests only the gap, never a range Garmin was already asked for."""
+
+    TASK_MODULE = "app.integrations.celery.tasks.garmin.backfill_task"
+
+    def test_start_floors_the_window(self) -> None:
+        user_id = str(uuid4())
+        start = datetime.now(timezone.utc) - timedelta(days=3)
+
+        init_window_state(user_id, start=start)
+
+        assert get_window_date_range(user_id)[0] == start
+        assert get_window_date_range_for_index(user_id, 0)[0] == start
+
+    def test_full_backfill_clears_a_previous_floor(self) -> None:
+        user_id = str(uuid4())
+        init_window_state(user_id, start=datetime.now(timezone.utc) - timedelta(days=3))
+
+        init_window_state(user_id)
+
+        start, end = get_window_date_range(user_id)
+        assert end - start == timedelta(days=BACKFILL_CHUNK_DAYS)
+
+    def _start(self, since: datetime, requested_at: datetime | None) -> tuple[dict, MagicMock]:
+        connection = MagicMock(scope=None, provider_user_id=None)
+        with (
+            patch(f"{self.TASK_MODULE}.SessionLocal"),
+            patch(f"{self.TASK_MODULE}.UserConnectionRepository") as repo_cls,
+            patch(f"{self.TASK_MODULE}.last_backfill_requested_at", return_value=requested_at),
+            patch(f"{self.TASK_MODULE}.acquire_backfill_lock", return_value=True),
+            patch(f"{self.TASK_MODULE}.get_current_window", return_value=0),
+            patch(f"{self.TASK_MODULE}.init_window_state") as init,
+            patch(f"{self.TASK_MODULE}.emit_sync_started"),
+            patch(f"{self.TASK_MODULE}.trigger_backfill_for_type"),
+        ):
+            repo_cls.return_value.get_by_user_and_provider.return_value = connection
+            result = start_full_backfill(str(uuid4()), since.isoformat())
+        return result, init
+
+    def test_gap_starts_after_the_last_requested_backfill(self) -> None:
+        now = datetime.now(timezone.utc)
+        requested_at = now - timedelta(days=2)
+
+        result, init = self._start(since=now - timedelta(days=5), requested_at=requested_at)
+
+        assert result["status"] == "started"
+        assert init.call_args.kwargs["start"] == requested_at + timedelta(seconds=1)
+
+    def test_gap_starts_at_last_sync_when_later(self) -> None:
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(days=1)
+
+        _, init = self._start(since=since, requested_at=now - timedelta(days=2))
+
+        assert init.call_args.kwargs["start"] == since
+
+    def test_nothing_left_to_request_skips(self) -> None:
+        now = datetime.now(timezone.utc)
+
+        result, init = self._start(since=now - timedelta(days=5), requested_at=now + timedelta(minutes=1))
+
+        assert result["status"] == "skipped"
+        init.assert_not_called()

@@ -179,19 +179,28 @@ class UserConnectionService(
         self.crud.update_last_synced_at(db_session, connection)
         return previous
 
-    def historical_start_on_connect(
-        self, db_session: DbSession, user_id: UUID, provider: str, last_synced_at: datetime | None, days: int
-    ) -> datetime:
-        """Start of the on-connect backfill: the gap since the last sync on a reconnect, else `days` back.
+    def reconnect_gap_start(
+        self, db_session: DbSession, user_id: UUID, provider: str, last_synced_at: datetime | None
+    ) -> datetime | None:
+        """Where the gap a reconnect has to backfill starts, or None when the full window is needed.
 
         Without held data (first connect, purged, or the first backfill never wrote) it is the full window.
         """
-        full_window = datetime.now(timezone.utc) - timedelta(days=days)
-        if last_synced_at is None or not data_type_coverage_repository.list_for_user(
-            db_session, user_id, provider=provider
+        if last_synced_at is None or not data_type_coverage_repository.exists_for_provider(
+            db_session, user_id, provider
         ):
+            return None
+        return last_synced_at
+
+    def historical_start_on_connect(
+        self, db_session: DbSession, user_id: UUID, provider: str, last_synced_at: datetime | None, days: int
+    ) -> datetime:
+        """Start of the on-connect pull: the gap since the last sync on a reconnect, else `days` back."""
+        full_window = datetime.now(timezone.utc) - timedelta(days=days)
+        gap_start = self.reconnect_gap_start(db_session, user_id, provider, last_synced_at)
+        if gap_start is None:
             return full_window
-        return max(last_synced_at - (settings.pull_sync_lookback or timedelta()), full_window)
+        return max(gap_start - (settings.pull_sync_lookback or timedelta()), full_window)
 
     def deregister_from_provider(
         self, db_session: DbSession, user_id: UUID, provider: str, oauth: BaseOAuthTemplate

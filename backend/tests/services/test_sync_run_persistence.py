@@ -27,7 +27,12 @@ from app.schemas.sync_status import (
     SyncStatus,
     SyncStatusEvent,
 )
-from app.services.sync_status_service import list_stored_runs, try_persist_run, try_record_data_types
+from app.services.sync_status_service import (
+    last_backfill_requested_at,
+    list_stored_runs,
+    try_persist_run,
+    try_record_data_types,
+)
 from tests.factories import UserFactory
 
 
@@ -392,6 +397,21 @@ class TestListStoredRunsFilters:
         runs = list_stored_runs(db, user.id, provider="garmin")
 
         assert [r.run_key for r in runs] == ["pull_garmin"]
+
+    @patch("app.services.sync_status_service.SessionLocal")
+    def test_last_backfill_requested_at_ignores_other_sources_and_providers(
+        self, mock_session_local: MagicMock, db: Session
+    ) -> None:
+        mock_session_local.return_value.__enter__.return_value = db
+        user = UserFactory()
+        now = datetime.now(timezone.utc)
+        backfill = {"provider": "garmin", "source": SyncSource.BACKFILL}
+        try_persist_run(_event(user.id, run_id="old", started_at=now - timedelta(days=9), **backfill))
+        try_persist_run(_event(user.id, run_id="latest", started_at=now - timedelta(days=2), **backfill))
+        try_persist_run(_event(user.id, run_id="pull", provider="garmin", started_at=now))
+        try_persist_run(_event(user.id, run_id="oura", provider="oura", source=SyncSource.BACKFILL, started_at=now))
+
+        assert last_backfill_requested_at(db, user.id, "garmin") == now - timedelta(days=2)
 
     @patch("app.services.sync_status_service.SessionLocal")
     def test_covered_range_matches_the_window_not_the_run_time(

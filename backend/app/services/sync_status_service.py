@@ -344,6 +344,11 @@ def list_stored_runs(
     return [SyncRunRecord.model_validate(run) for run in runs]
 
 
+def last_backfill_requested_at(db: DbSession, user_id: UUID, provider: str) -> datetime | None:
+    """When the user's latest provider-side backfill started; its window ends no later than this."""
+    return sync_run_repository.last_started_at(db, user_id, provider, SyncSource.BACKFILL)
+
+
 def get_stored_run(db: DbSession, run_key: str) -> SyncRunDetail | None:
     """One stored run with its per-data-type breakdown, or None when unknown."""
     run = sync_run_repository.get_with_data_types(db, run_key)

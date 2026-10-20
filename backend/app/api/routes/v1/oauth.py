@@ -116,7 +116,10 @@ def oauth_callback(
     if settings.historical_sync_on_connect:
         caps = strategy.capabilities
         if caps.webhook_callback:
-            start_garmin_full_backfill.delay(str(oauth_state.user_id))
+            gap_start = user_connection_service.reconnect_gap_start(
+                db, oauth_state.user_id, provider_name.value, previous_synced_at
+            )
+            start_garmin_full_backfill.delay(str(oauth_state.user_id), gap_start.isoformat() if gap_start else None)
         elif caps.rest_pull:
             now = datetime.now(timezone.utc)
             start_date = user_connection_service.historical_start_on_connect(

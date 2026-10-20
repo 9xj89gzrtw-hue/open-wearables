@@ -7,7 +7,7 @@ from sqlalchemy.orm import InstrumentedAttribute, selectinload
 
 from app.database import DbSession
 from app.models import SyncRun, SyncRunDataType
-from app.schemas.sync_status import DataTypeOutcome, SyncRunWrite, SyncScope, SyncStatus
+from app.schemas.sync_status import DataTypeOutcome, SyncRunWrite, SyncScope, SyncSource, SyncStatus
 
 
 def _overlaps(
@@ -181,6 +181,14 @@ class SyncRunRepository:
     def get_with_data_types(self, db_session: DbSession, run_key: str) -> SyncRun | None:
         stmt = select(SyncRun).where(SyncRun.run_key == run_key).options(selectinload(SyncRun.data_types))
         return db_session.execute(stmt).scalar_one_or_none()
+
+    def last_started_at(
+        self, db_session: DbSession, user_id: UUID, provider: str, source: SyncSource
+    ) -> datetime | None:
+        stmt = select(func.max(SyncRun.started_at)).where(
+            SyncRun.user_id == user_id, SyncRun.provider == provider, SyncRun.source == source
+        )
+        return db_session.execute(stmt).scalar()
 
     def list_for_user(
         self,
