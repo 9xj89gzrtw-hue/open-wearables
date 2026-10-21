@@ -437,6 +437,17 @@ class TestGarmin247Data:
 
         assert [sample["value"] for sample in normalized["steps"]] == [420]
 
+    def test_normalize_epochs_skips_a_non_numeric_metric(
+        self, garmin_247: Garmin247Data, mixed_slot_epochs: list[dict[str, Any]]
+    ) -> None:
+        """A non-numeric metric is left out of the slot's sum; the slot's other epochs still count."""
+        running = {**mixed_slot_epochs[0], "activityType": "RUNNING", "steps": "n/a", "activeKilocalories": 9}
+
+        normalized = garmin_247.normalize_epochs([*mixed_slot_epochs, running], uuid4())
+
+        assert [sample["value"] for sample in normalized["steps"]] == [420]
+        assert [sample["value"] for sample in normalized["energy"]] == [27]
+
     # -------------------------------------------------------------------------
     # Body Composition Tests
     # -------------------------------------------------------------------------

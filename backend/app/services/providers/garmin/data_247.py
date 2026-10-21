@@ -715,7 +715,10 @@ class Garmin247Data(Base247DataTemplate):
         for slot in slots.values():
             slot_epochs = slot.pop("epochs").values()
             for samples, field in ((step_samples, "steps"), (energy_samples, "activeKilocalories")):
-                values = [e[field] for e in slot_epochs if e.get(field) is not None]
+                # A malformed metric is left out so the slot's other epochs still count.
+                values = [
+                    v for e in slot_epochs if isinstance(v := e.get(field), int | float) and not isinstance(v, bool)
+                ]
                 if values:
                     samples.append({**slot, "value": sum(values)})
 
