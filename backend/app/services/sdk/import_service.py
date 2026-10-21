@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 import sentry_sdk
 from pydantic import ValidationError
+from redis.exceptions import LockError
 
 from app.constants.entry_source import get_unified_sdk_entry_source
 from app.constants.series_types.sdk import (
@@ -535,8 +536,25 @@ class ImportService:
 
         # Process sleep (count sleep segments from input)
         if request.data.sleep:
-            handle_sleep_data(db_session, request, user_id)
-            sleep_saved = len(request.data.sleep)
+            try:
+                handle_sleep_data(db_session, request, user_id)
+                sleep_saved = len(request.data.sleep)
+            except LockError as e:
+                # The rest of the batch is committed, so only its sleep is reported as dropped.
+                log_structured(
+                    self.log,
+                    "warning",
+                    "SDK sleep not saved: sleep processing lock unavailable",
+                    provider=f"{request.provider}",
+                    action="sdk_sleep_lock_unavailable",
+                    batch_id=batch_id,
+                    user_id=user_id,
+                    sleep_count=len(request.data.sleep),
+                )
+                dropped.extend(
+                    InvalidRecord(collection="sleep", index=i, loc="", msg=str(e), type="lock_unavailable")
+                    for i in range(len(request.data.sleep))
+                )
 
         return {
             "workouts_saved": workouts_saved,
