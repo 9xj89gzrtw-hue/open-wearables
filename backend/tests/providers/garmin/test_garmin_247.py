@@ -427,6 +427,16 @@ class TestGarmin247Data:
         assert [sample["value"] for sample in normalized["steps"]] == [450]
         assert [sample["value"] for sample in normalized["energy"]] == [19]
 
+    def test_normalize_epochs_skips_an_epoch_with_an_invalid_start(
+        self, garmin_247: Garmin247Data, mixed_slot_epochs: list[dict[str, Any]]
+    ) -> None:
+        """An epoch whose start can't be converted is dropped on its own; the push's other epochs are kept."""
+        broken = {**mixed_slot_epochs[0], "startTimeInSeconds": "not-a-timestamp"}
+
+        normalized = garmin_247.normalize_epochs([*mixed_slot_epochs, broken], uuid4())
+
+        assert [sample["value"] for sample in normalized["steps"]] == [420]
+
     # -------------------------------------------------------------------------
     # Body Composition Tests
     # -------------------------------------------------------------------------
@@ -820,6 +830,19 @@ class TestGarmin247Data:
         assert sorted((type_id, float(value)) for type_id, value in stored) == sorted(
             [(get_series_type_id(SeriesType.steps), 420.0), (get_series_type_id(SeriesType.active_energy), 18.0)]
         )
+
+    @patch("app.services.providers.garmin.data_247.log_and_capture_error")
+    def test_process_items_batch_epochs_reports_a_failure_to_sentry(
+        self, mock_capture: MagicMock, garmin_247: Garmin247Data, db: Session, mixed_slot_epochs: list[dict[str, Any]]
+    ) -> None:
+        """A failure building the push's epoch samples is suppressed but still captured."""
+        user = UserFactory()
+
+        with patch.object(garmin_247, "normalize_epochs", side_effect=RuntimeError("boom")):
+            garmin_247.process_items_batch(db, user.id, "epochs", mixed_slot_epochs)
+
+        mock_capture.assert_called_once()
+        assert mock_capture.call_args.args[2] == "Error building batch epoch items"
 
     @patch("app.repositories.data_point_series_repository.DataPointSeriesRepository.bulk_create")
     def test_process_items_batch_stress(

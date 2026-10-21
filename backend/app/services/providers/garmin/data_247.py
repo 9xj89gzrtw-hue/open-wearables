@@ -38,6 +38,7 @@ from app.services.providers.templates.base_oauth import BaseOAuthTemplate
 from app.services.raw_payload_storage import store_fit_file
 from app.utils.conversion import seconds_to_minutes
 from app.utils.dates import offset_to_iso
+from app.utils.sentry_helpers import log_and_capture_error
 from app.utils.structured_logging import log_structured
 
 # Series types to skip when parsing FIT files — already present from activityDetails.
@@ -668,7 +669,11 @@ class Garmin247Data(Base247DataTemplate):
             if not start_ts:
                 continue
 
-            recorded_at = self._from_epoch_seconds(start_ts)
+            # Skip only this epoch: the push's other epochs are normalized in the same call.
+            try:
+                recorded_at = self._from_epoch_seconds(start_ts)
+            except (TypeError, ValueError, OverflowError, OSError):
+                continue
             zone_offset = offset_to_iso(epoch.get("startTimeOffsetInSeconds"))
 
             # Garmin epoch summaryId is "{devicePrefix}-{hex(startTimeInSeconds)}-{activityTypeCode}".
@@ -2071,13 +2076,11 @@ class Garmin247Data(Base247DataTemplate):
             try:
                 all_samples.extend(self._build_epochs_samples(user_id, self.normalize_epochs(epoch_items, user_id)))
             except Exception as e:
-                log_structured(
+                log_and_capture_error(
+                    e,
                     self.logger,
-                    "warning",
-                    f"Error building batch items for {summary_type}: {e}",
-                    provider="garmin",
-                    task="process_items_batch",
-                    user_id=str(user_id),
+                    "Error building batch epoch items",
+                    extra={"provider": "garmin", "task": "process_items_batch", "user_id": str(user_id)},
                 )
 
         count = WriteCounts(0, 0)
