@@ -659,8 +659,9 @@ class Garmin247Data(Base247DataTemplate):
             Dict with keys like 'heart_rate', 'steps', etc.
         """
         heart_rate_samples: list[dict[str, Any]] = []
-        step_samples: list[dict[str, Any]] = []
-        energy_samples: list[dict[str, Any]] = []
+        # Garmin sends one epoch per activity type in a slot, so a slot's steps and active calories
+        # are summed over its types; a repeated slot and type replaces the earlier epoch.
+        slots: dict[int, dict[str, Any]] = {}
 
         for epoch in raw_epochs:
             start_ts = epoch.get("startTimeInSeconds", 0)
@@ -692,29 +693,26 @@ class Garmin247Data(Base247DataTemplate):
                     }
                 )
 
-            # Steps
-            steps = epoch.get("steps")
-            if steps is not None:
-                step_samples.append(
-                    {
-                        "timestamp": recorded_at.isoformat(),
-                        "value": steps,
-                        "zone_offset": zone_offset,
-                        "external_id": slot_external_id,
-                    }
-                )
+            # Steps and active calories, summed per slot below
+            slot = slots.setdefault(
+                start_ts,
+                {
+                    "timestamp": recorded_at.isoformat(),
+                    "zone_offset": zone_offset,
+                    "external_id": slot_external_id,
+                    "epochs": {},
+                },
+            )
+            slot["epochs"][epoch.get("activityType")] = epoch
 
-            # Active calories
-            calories = epoch.get("activeKilocalories")
-            if calories is not None:
-                energy_samples.append(
-                    {
-                        "timestamp": recorded_at.isoformat(),
-                        "value": calories,
-                        "zone_offset": zone_offset,
-                        "external_id": slot_external_id,
-                    }
-                )
+        step_samples: list[dict[str, Any]] = []
+        energy_samples: list[dict[str, Any]] = []
+        for slot in slots.values():
+            slot_epochs = slot.pop("epochs").values()
+            for samples, field in ((step_samples, "steps"), (energy_samples, "activeKilocalories")):
+                values = [e[field] for e in slot_epochs if e.get(field) is not None]
+                if values:
+                    samples.append({**slot, "value": sum(values)})
 
         return {
             "heart_rate": heart_rate_samples,
@@ -1880,6 +1878,7 @@ class Garmin247Data(Base247DataTemplate):
         all_sleep_details: list[EventRecordDetailCreate] = []
         all_mct_details: list[MenstrualCycleDetailCreate] = []
         all_health_scores: list[HealthScoreCreate] = []
+        epoch_items: list[dict[str, Any]] = []
 
         for item in items:
             try:
@@ -1890,8 +1889,8 @@ class Garmin247Data(Base247DataTemplate):
                         all_samples.extend(self._build_dailies_samples(user_id, normalized))
                         all_health_scores.extend(health_scores)
                     case "epochs":
-                        normalized = self.normalize_epochs([item], user_id)
-                        all_samples.extend(self._build_epochs_samples(user_id, normalized))
+                        # Normalized together after the loop, so a slot's activity types are summed.
+                        epoch_items.append(item)
                     case "bodyComps":
                         all_samples.extend(self._build_body_comp_samples(user_id, item))
                     case "hrv":
@@ -2063,6 +2062,19 @@ class Garmin247Data(Base247DataTemplate):
                     self.logger,
                     "warning",
                     f"Error building batch item for {summary_type}: {e}",
+                    provider="garmin",
+                    task="process_items_batch",
+                    user_id=str(user_id),
+                )
+
+        if epoch_items:
+            try:
+                all_samples.extend(self._build_epochs_samples(user_id, self.normalize_epochs(epoch_items, user_id)))
+            except Exception as e:
+                log_structured(
+                    self.logger,
+                    "warning",
+                    f"Error building batch items for {summary_type}: {e}",
                     provider="garmin",
                     task="process_items_batch",
                     user_id=str(user_id),
