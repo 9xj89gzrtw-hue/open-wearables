@@ -427,11 +427,15 @@ class TestGarmin247Data:
         assert [sample["value"] for sample in normalized["steps"]] == [450]
         assert [sample["value"] for sample in normalized["energy"]] == [19]
 
-    def test_normalize_epochs_skips_an_epoch_with_an_invalid_start(
-        self, garmin_247: Garmin247Data, mixed_slot_epochs: list[dict[str, Any]]
+    @pytest.mark.parametrize(
+        "malformed",
+        [{"startTimeInSeconds": "not-a-timestamp"}, {"startTimeOffsetInSeconds": "n/a"}, {"summaryId": 12345}],
+    )
+    def test_normalize_epochs_skips_only_a_malformed_epoch(
+        self, garmin_247: Garmin247Data, mixed_slot_epochs: list[dict[str, Any]], malformed: dict[str, Any]
     ) -> None:
-        """An epoch whose start can't be converted is dropped on its own; the push's other epochs are kept."""
-        broken = {**mixed_slot_epochs[0], "startTimeInSeconds": "not-a-timestamp"}
+        """A malformed epoch is dropped on its own; the push's other epochs are kept."""
+        broken = {**mixed_slot_epochs[0], "activityType": "RUNNING", "steps": 300, **malformed}
 
         normalized = garmin_247.normalize_epochs([*mixed_slot_epochs, broken], uuid4())
 

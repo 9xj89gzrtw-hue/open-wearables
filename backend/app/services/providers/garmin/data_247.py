@@ -665,50 +665,16 @@ class Garmin247Data(Base247DataTemplate):
         slots: dict[int, dict[str, Any]] = {}
 
         for epoch in raw_epochs:
-            start_ts = epoch.get("startTimeInSeconds", 0)
-            if not start_ts:
-                continue
-
-            # Skip only this epoch: the push's other epochs are normalized in the same call.
+            # Skip only a malformed epoch: the push's other epochs are normalized in the same call.
             try:
-                recorded_at = self._from_epoch_seconds(start_ts)
-            except (TypeError, ValueError, OverflowError, OSError):
-                continue
-            zone_offset = offset_to_iso(epoch.get("startTimeOffsetInSeconds"))
-
-            # Garmin epoch summaryId is "{devicePrefix}-{hex(startTimeInSeconds)}-{activityTypeCode}".
-            # Strip only the activityType suffix → "{devicePrefix}-{hex(start)}", a stable
-            # per-slot id shared by every activity in the slot, so intraday rows carry a real,
-            # deterministic external_id. Require >=2 dashes before stripping so a malformed
-            # 2-part id can't collapse to the bare device prefix (which would collide across slots).
-            summary_id = epoch.get("summaryId")
-            slot_external_id = (
-                summary_id.rpartition("-")[0] if summary_id and summary_id.count("-") >= 2 else summary_id
-            )
-
-            # Heart rate
-            mean_hr = epoch.get("meanHeartRateInBeatsPerMinute")
-            if mean_hr:
-                heart_rate_samples.append(
-                    {
-                        "timestamp": recorded_at.isoformat(),
-                        "value": mean_hr,
-                        "zone_offset": zone_offset,
-                        "external_id": slot_external_id,
-                    }
+                self._collect_epoch(epoch, slots, heart_rate_samples)
+            except Exception as e:
+                log_and_capture_error(
+                    e,
+                    self.logger,
+                    "Skipped a malformed Garmin epoch",
+                    extra={"provider": "garmin", "user_id": str(user_id)},
                 )
-
-            # Steps and active calories, summed per slot below
-            slot = slots.setdefault(
-                start_ts,
-                {
-                    "timestamp": recorded_at.isoformat(),
-                    "zone_offset": zone_offset,
-                    "external_id": slot_external_id,
-                    "epochs": {},
-                },
-            )
-            slot["epochs"][epoch.get("activityType")] = epoch
 
         step_samples: list[dict[str, Any]] = []
         energy_samples: list[dict[str, Any]] = []
@@ -727,6 +693,52 @@ class Garmin247Data(Base247DataTemplate):
             "steps": step_samples,
             "energy": energy_samples,
         }
+
+    def _collect_epoch(
+        self,
+        epoch: dict[str, Any],
+        slots: dict[int, dict[str, Any]],
+        heart_rate_samples: list[dict[str, Any]],
+    ) -> None:
+        """Add one epoch to its slot, and its heart rate if any. Raises on a malformed epoch."""
+        start_ts = epoch.get("startTimeInSeconds", 0)
+        if not start_ts:
+            return
+
+        recorded_at = self._from_epoch_seconds(start_ts)
+        zone_offset = offset_to_iso(epoch.get("startTimeOffsetInSeconds"))
+
+        # Garmin epoch summaryId is "{devicePrefix}-{hex(startTimeInSeconds)}-{activityTypeCode}".
+        # Strip only the activityType suffix → "{devicePrefix}-{hex(start)}", a stable
+        # per-slot id shared by every activity in the slot, so intraday rows carry a real,
+        # deterministic external_id. Require >=2 dashes before stripping so a malformed
+        # 2-part id can't collapse to the bare device prefix (which would collide across slots).
+        summary_id = epoch.get("summaryId")
+        slot_external_id = summary_id.rpartition("-")[0] if summary_id and summary_id.count("-") >= 2 else summary_id
+
+        # Steps and active calories, summed per slot in normalize_epochs
+        slot = slots.setdefault(
+            start_ts,
+            {
+                "timestamp": recorded_at.isoformat(),
+                "zone_offset": zone_offset,
+                "external_id": slot_external_id,
+                "epochs": {},
+            },
+        )
+        slot["epochs"][epoch.get("activityType")] = epoch
+
+        # Heart rate
+        mean_hr = epoch.get("meanHeartRateInBeatsPerMinute")
+        if mean_hr:
+            heart_rate_samples.append(
+                {
+                    "timestamp": recorded_at.isoformat(),
+                    "value": mean_hr,
+                    "zone_offset": zone_offset,
+                    "external_id": slot_external_id,
+                }
+            )
 
     def _build_epochs_samples(
         self,
