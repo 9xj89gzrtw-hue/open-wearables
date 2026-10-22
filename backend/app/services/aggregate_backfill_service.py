@@ -61,6 +61,7 @@ class AggregateBackfillService:
             BackfillStep("rollup_all", self._rollup(None)),
             BackfillStep("garmin_epoch_windows", self._garmin_epoch_windows),
             BackfillStep("archive_days", self._archive_days),
+            BackfillStep("delete_copied_samples", self._delete_copied_samples),
         ]
 
     def is_done(self, db: DbSession) -> bool:
@@ -180,6 +181,23 @@ class AggregateBackfillService:
             return True
 
         return self._each_source(db, deadline, "archive_days", self.repo.archive_sources, copy)
+
+    def _delete_copied_samples(self, db: DbSession, deadline: float) -> bool:
+        """Day and session values the history steps copied, gone from series_sample, and their days rolled up
+        again without them. Only samples recorded before the history was copied, and only where the provider's
+        aggregate row holds the very same value: a genuine sample that happens to match a rule stays."""
+        cutoff = self.migrations.completed_at(db, f"{BACKFILL_MIGRATION}:history_all")
+        if cutoff is None:
+            return False
+
+        def delete(source: tuple[UUID, str]) -> bool:
+            source_id, provider = source
+            days = self.repo.delete_copied_samples(db, source_id, provider, cutoff)
+            db.commit()
+            rollup_queue.requeue_dirty_days(days)
+            return True
+
+        return self._each_source(db, deadline, "delete_copied_samples", self.repo.history_sources, delete)
 
     def _each_source[S](
         self,
