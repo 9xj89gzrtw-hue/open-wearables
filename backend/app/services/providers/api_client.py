@@ -28,6 +28,8 @@ TOKEN_REFRESH_BUFFER = timedelta(minutes=5)
 
 # Session.info key of the per-session token cache: (user_id, provider) -> (access_token, token_expires_at).
 # A sync makes many provider requests on one session; without the cache each of them re-reads user_connection.
+# A cached token doesn't see a revoke or disconnect made elsewhere: the sync keeps using it until its session
+# ends or the provider rejects it.
 _TOKEN_CACHE_KEY = "provider_access_tokens"
 
 

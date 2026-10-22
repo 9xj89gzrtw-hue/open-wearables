@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.repositories import UserConnectionRepository
-from app.services.providers.api_client import get_valid_token, make_authenticated_request
+from app.services.providers.api_client import download_binary_content, get_valid_token, make_authenticated_request
 from tests.factories import UserConnectionFactory
 
 API_BASE_URL = "https://api.example.com"
@@ -94,6 +94,27 @@ def test_request_retries_with_token_refreshed_elsewhere(db: Session, connection:
 
     assert result == {"ok": True}
     assert client.sent_auth == [f"Bearer {stale_token}", "Bearer refreshed-by-another-worker"]
+
+
+def test_download_retries_with_token_refreshed_elsewhere(db: Session, connection: Any, repo: Any) -> None:
+    stale_token = get_valid_token(db, connection.user_id, "whoop", repo, MagicMock())
+    db.execute(
+        text("UPDATE user_connection SET access_token = 'refreshed-by-another-worker' WHERE id = :id"),
+        {"id": connection.id},
+    )
+    request = httpx.Request("GET", f"{API_BASE_URL}/file")
+    sent_auth: list[str] = []
+
+    def get(url: str, headers: dict[str, str], **kwargs: Any) -> httpx.Response:
+        sent_auth.append(headers["Authorization"])
+        status_code = 401 if len(sent_auth) == 1 else 200
+        return httpx.Response(status_code, content=b"file", request=request)
+
+    with patch("app.services.providers.api_client.httpx.get", side_effect=get):
+        content = download_binary_content(db, connection.user_id, repo, MagicMock(), "whoop", f"{API_BASE_URL}/file")
+
+    assert content == b"file"
+    assert sent_auth == [f"Bearer {stale_token}", "Bearer refreshed-by-another-worker"]
 
 
 def test_request_does_not_retry_when_token_is_unchanged(db: Session, connection: Any, repo: Any) -> None:
