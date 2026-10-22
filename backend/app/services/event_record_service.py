@@ -79,7 +79,7 @@ from app.utils.context import current_sync_payload
 from app.utils.conversion import as_dict_list, as_float, as_model, minutes_to_seconds, sum_optional
 from app.utils.exceptions import handle_exceptions
 from app.utils.pagination import encode_cursor
-from app.utils.sleep_stages import reported_stage_minutes
+from app.utils.sleep_stages import measured_stages
 
 
 def _meal_summary(nutrients: dict[SeriesType, float]) -> tuple[float | None, Macros | None, float | None]:
@@ -503,7 +503,7 @@ class EventRecordService(
                 deep_min, light_min, rem_min = int(deep_secs / 60), int(light_secs / 60), int(rem_secs / 60)
                 merged_total = deep_min + light_min + rem_min + int(sleeping_secs / 60)
                 # A merged hypnogram of only sleeping segments still reports no phases
-                has_phases, has_awake = reported_stage_minutes(merged_stages)
+                has_phases, has_awake = measured_stages(merged_stages)
                 merged_deep = deep_min if has_phases else None
                 merged_light = light_min if has_phases else None
                 merged_rem = rem_min if has_phases else None

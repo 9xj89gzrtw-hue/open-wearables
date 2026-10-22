@@ -36,7 +36,7 @@ from app.schemas.providers.mobile_sdk import (
 from app.services.event_record_service import event_record_service
 from app.services.health_score_service import health_score_service
 from app.services.sdk.device_resolution import extract_device_ids, extract_device_info, extract_device_type
-from app.utils.sleep_stages import reported_stage_minutes
+from app.utils.sleep_stages import measured_stages
 from app.utils.structured_logging import log_structured
 
 logger = getLogger(__name__)
@@ -549,7 +549,7 @@ def finish_sleep(db_session: DbSession, user_id: str, state: SleepState) -> None
     sleep_efficiency = (
         Decimal(str(total_sleep_seconds / time_in_bed_seconds * 100)) if time_in_bed_seconds > 0 else None
     )
-    has_phases, has_awake = reported_stage_minutes(cleaned_stages)
+    has_phases, has_awake = measured_stages(cleaned_stages)
 
     sleep_record = EventRecordCreate(
         id=uuid4(),

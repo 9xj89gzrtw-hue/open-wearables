@@ -240,7 +240,9 @@ Sleep sessions follow the same rule: `sleep_stage_intervals` is omitted unless y
 A sleep stage's minutes (`deep_minutes`, `light_minutes`, `rem_minutes`, `awake_minutes`) are
 `null` when the source did not measure that stage, and `0` only when it measured it and found
 none. An iPhone without a watch, older Apple Watches and many third-party apps record only time
-asleep or in bed, so their nights carry no light/deep/rem breakdown. In the daily sleep summary
+asleep or in bed, so their nights carry no light/deep/rem breakdown. Nights from cloud providers
+stored before this behavior was introduced may still show `0` for stages the provider did not
+report. In the daily sleep summary
 (`/summaries/sleep`), `stages` itself is `null` when no stage is reported.
 
 ---

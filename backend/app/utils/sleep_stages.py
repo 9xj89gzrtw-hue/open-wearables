@@ -4,7 +4,7 @@ from app.constants.sleep import SleepStageType
 from app.schemas.model_crud.activities.sleep import SleepStage
 
 
-def reported_stage_minutes(stages: Iterable[SleepStage]) -> tuple[bool, bool]:
+def measured_stages(stages: Iterable[SleepStage]) -> tuple[bool, bool]:
     """Whether a hypnogram measures the light/deep/rem phases, and whether it measures awake time.
 
     One of only ``sleeping`` or ``in_bed`` segments carries no phases, so their minutes are unknown.
