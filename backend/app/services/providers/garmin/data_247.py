@@ -36,7 +36,7 @@ from app.services.providers.sync_247_result import Sync247Result
 from app.services.providers.templates.base_247_data import Base247DataTemplate
 from app.services.providers.templates.base_oauth import BaseOAuthTemplate
 from app.services.raw_payload_storage import store_fit_file
-from app.utils.conversion import seconds_to_minutes
+from app.utils.conversion import seconds_to_minutes, to_decimal
 from app.utils.dates import offset_to_iso
 from app.utils.sentry_helpers import log_and_capture_error
 from app.utils.structured_logging import log_structured
@@ -664,27 +664,34 @@ class Garmin247Data(Base247DataTemplate):
         # are summed over its types; a repeated slot and type replaces the earlier epoch.
         slots: dict[int, dict[str, Any]] = {}
 
+        skipped: list[tuple[Any, Exception]] = []
         for epoch in raw_epochs:
             # Skip only a malformed epoch: the push's other epochs are normalized in the same call.
             try:
                 self._collect_epoch(epoch, slots, heart_rate_samples)
             except Exception as e:
-                log_and_capture_error(
-                    e,
-                    self.logger,
-                    "Skipped a malformed Garmin epoch",
-                    extra={"provider": "garmin", "user_id": str(user_id)},
-                )
+                skipped.append((epoch.get("summaryId") if isinstance(epoch, dict) else None, e))
+        if skipped:
+            # Once per call, so a format change hitting every epoch is one event rather than hundreds.
+            log_and_capture_error(
+                skipped[0][1],
+                self.logger,
+                "Skipped malformed Garmin epochs",
+                extra={
+                    "provider": "garmin",
+                    "user_id": str(user_id),
+                    "skipped": len(skipped),
+                    "summary_ids": [summary_id for summary_id, _ in skipped[:5]],
+                },
+            )
 
         step_samples: list[dict[str, Any]] = []
         energy_samples: list[dict[str, Any]] = []
         for slot in slots.values():
             slot_epochs = slot.pop("epochs").values()
             for samples, field in ((step_samples, "steps"), (energy_samples, "activeKilocalories")):
-                # A malformed metric is left out so the slot's other epochs still count.
-                values = [
-                    v for e in slot_epochs if isinstance(v := e.get(field), int | float) and not isinstance(v, bool)
-                ]
+                # to_decimal leaves out a malformed metric, so the slot's other epochs still count.
+                values = [value for e in slot_epochs if (value := to_decimal(e.get(field))) is not None]
                 if values:
                     samples.append({**slot, "value": sum(values)})
 
