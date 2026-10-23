@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -230,7 +230,7 @@ class Sync247Run:
         savepoint: bool = False,
         capture: bool = False,
         accumulate: bool = False,
-    ) -> Iterator[Sync247Step]:
+    ) -> Generator[Sync247Step]:
         """Run one data type's fetch + save, recording the outcome either way.
 
         commit: commit the session after a successful body.
