@@ -128,6 +128,7 @@ class Oura247Data(Base247DataTemplate):
                     endpoint=endpoint,
                     error=str(e),
                     user_id=str(user_id),
+                    exc_info=e,
                 )
                 if all_data:
                     logger.warning(

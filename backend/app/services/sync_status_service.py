@@ -481,7 +481,7 @@ def _maybe_dispatch_outgoing_webhook(event: SyncStatusEvent) -> None:
                 metadata=event.metadata,
             )
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(
+        logger.warning(
             "Failed to dispatch outgoing sync webhook",
             provider=event.provider,
             run_id=event.run_id,
