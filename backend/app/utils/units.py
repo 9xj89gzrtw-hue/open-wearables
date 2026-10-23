@@ -53,6 +53,7 @@ class SpeedUnit(StrEnum):
     m_per_s = "m_per_s"
     km_per_h = "km_per_h"
     mi_per_h = "mi_per_h"
+    ft_per_s = "ft_per_s"
 
 
 class TemperatureUnit(StrEnum):
@@ -69,6 +70,8 @@ class BloodGlucoseUnit(StrEnum):
 type Unit = LengthUnit | MassUnit | VolumeUnit | EnergyUnit | SpeedUnit | TemperatureUnit | BloodGlucoseUnit
 
 # Factors to the first unit of each table: value_in_base = value * factor[unit].
+# Energy and speed use J and m/h as base so every factor is exact: with a kcal or
+# m/s base, kJ and km/h factors would be repeating decimals (41.84 kJ -> 9.999... kcal).
 _LENGTH_TO_M: dict[LengthUnit, Decimal] = {
     LengthUnit.m: Decimal(1),
     LengthUnit.mm: Decimal("0.001"),
@@ -98,17 +101,18 @@ _VOLUME_TO_ML: dict[VolumeUnit, Decimal] = {
     VolumeUnit.cup_us: Decimal("236.5882365"),
 }
 
-_ENERGY_TO_KCAL: dict[EnergyUnit, Decimal] = {
-    EnergyUnit.kcal: Decimal(1),
-    EnergyUnit.cal: Decimal("0.001"),
-    EnergyUnit.kj: Decimal(1) / Decimal("4.184"),
-    EnergyUnit.j: Decimal(1) / Decimal(4184),
+_ENERGY_TO_J: dict[EnergyUnit, Decimal] = {
+    EnergyUnit.j: Decimal(1),
+    EnergyUnit.cal: Decimal("4.184"),
+    EnergyUnit.kj: Decimal(1000),
+    EnergyUnit.kcal: Decimal(4184),
 }
 
-_SPEED_TO_M_PER_S: dict[SpeedUnit, Decimal] = {
-    SpeedUnit.m_per_s: Decimal(1),
-    SpeedUnit.km_per_h: Decimal(1000) / Decimal(3600),
-    SpeedUnit.mi_per_h: Decimal("1609.344") / Decimal(3600),
+_SPEED_TO_M_PER_H: dict[SpeedUnit, Decimal] = {
+    SpeedUnit.m_per_s: Decimal(3600),
+    SpeedUnit.km_per_h: Decimal(1000),
+    SpeedUnit.mi_per_h: Decimal("1609.344"),
+    SpeedUnit.ft_per_s: Decimal("1097.28"),
 }
 
 # Health Connect's own mg/dL converter uses exactly 18.0, so values written to HC
@@ -150,6 +154,7 @@ _UNIT_ALIASES: dict[str, Unit] = {
     "km/h": SpeedUnit.km_per_h,
     "mi/hr": SpeedUnit.mi_per_h,
     "mph": SpeedUnit.mi_per_h,
+    "ft/s": SpeedUnit.ft_per_s,
     "degC": TemperatureUnit.celsius,
     "°C": TemperatureUnit.celsius,
     "degF": TemperatureUnit.fahrenheit,
@@ -214,11 +219,11 @@ class UnitConverter:
 
     @staticmethod
     def energy(value: Decimal, from_unit: EnergyUnit, to_unit: EnergyUnit) -> Decimal:
-        return _scale(value, from_unit, to_unit, _ENERGY_TO_KCAL)
+        return _scale(value, from_unit, to_unit, _ENERGY_TO_J)
 
     @staticmethod
     def speed(value: Decimal, from_unit: SpeedUnit, to_unit: SpeedUnit) -> Decimal:
-        return _scale(value, from_unit, to_unit, _SPEED_TO_M_PER_S)
+        return _scale(value, from_unit, to_unit, _SPEED_TO_M_PER_H)
 
     @staticmethod
     def blood_glucose(value: Decimal, from_unit: BloodGlucoseUnit, to_unit: BloodGlucoseUnit) -> Decimal:

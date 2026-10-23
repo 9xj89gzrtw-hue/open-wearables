@@ -34,6 +34,7 @@ class TestParseUnit:
             ("fl_oz_us", VolumeUnit.fl_oz_us),
             ("kJ", EnergyUnit.kj),
             ("km/hr", SpeedUnit.km_per_h),
+            ("ft/s", SpeedUnit.ft_per_s),
             ("degF", TemperatureUnit.fahrenheit),
             ("°C", TemperatureUnit.celsius),
             ("mg/dL", BloodGlucoseUnit.mg_dl),
@@ -66,6 +67,8 @@ class TestUnitConverter:
             (Decimal("0.5"), VolumeUnit.liter, VolumeUnit.ml, Decimal("500")),
             (Decimal("500"), EnergyUnit.cal, EnergyUnit.kcal, Decimal("0.5")),
             (Decimal("36"), SpeedUnit.km_per_h, SpeedUnit.m_per_s, Decimal("10")),
+            (Decimal("1"), SpeedUnit.ft_per_s, SpeedUnit.m_per_s, Decimal("0.3048")),
+            (Decimal("6.25"), SpeedUnit.mi_per_h, SpeedUnit.m_per_s, Decimal("2.794")),
             (Decimal("98.6"), TemperatureUnit.fahrenheit, TemperatureUnit.celsius, Decimal("37")),
             (Decimal("37"), TemperatureUnit.celsius, TemperatureUnit.fahrenheit, Decimal("98.6")),
             (Decimal("310.15"), TemperatureUnit.kelvin, TemperatureUnit.celsius, Decimal("37")),
@@ -78,8 +81,17 @@ class TestUnitConverter:
         assert result is not None
         assert result == pytest.approx(expected, abs=Decimal("0.000001"))
 
-    def test_kilojoules_to_kcal(self) -> None:
-        assert UnitConverter.energy(Decimal("418.4"), EnergyUnit.kj, EnergyUnit.kcal) == pytest.approx(Decimal("100"))
+    @pytest.mark.parametrize(
+        ("value", "from_unit", "to_unit", "expected"),
+        [
+            (Decimal("41.84"), EnergyUnit.kj, EnergyUnit.kcal, Decimal("10")),
+            (Decimal("418.4"), EnergyUnit.kj, EnergyUnit.kcal, Decimal("100")),
+            (Decimal("4184"), EnergyUnit.j, EnergyUnit.kcal, Decimal("1")),
+            (Decimal("36"), SpeedUnit.km_per_h, SpeedUnit.m_per_s, Decimal("10")),
+        ],
+    )
+    def test_round_values_stay_exact(self, value: Decimal, from_unit: Unit, to_unit: Unit, expected: Decimal) -> None:
+        assert UnitConverter.convert(value, from_unit, to_unit) == expected
 
     def test_same_unit_is_unchanged(self) -> None:
         assert UnitConverter.length(Decimal("1.234"), LengthUnit.cm, LengthUnit.cm) == Decimal("1.234")
@@ -104,6 +116,7 @@ class TestToSeriesUnit:
             (SeriesType.weight, Decimal("150"), "lb", Decimal("68.0388555")),
             (SeriesType.body_temperature, Decimal("98.6"), "degF", Decimal("37")),
             (SeriesType.walking_speed, Decimal("3.6"), "km/hr", Decimal("1")),
+            (SeriesType.stair_ascent_speed, Decimal("1.17239"), "ft/s", Decimal("0.357344472")),
             (SeriesType.hydration, Decimal("0.25"), "L", Decimal("250")),
             (SeriesType.dietary_energy_consumed, Decimal("1000"), "kJ", Decimal("239.005736")),
             (SeriesType.dietary_sodium, Decimal("0.5"), "g", Decimal("500")),
