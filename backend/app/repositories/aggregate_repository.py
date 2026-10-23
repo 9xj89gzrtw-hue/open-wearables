@@ -35,21 +35,7 @@ class AggregateRepository:
 
     def upsert(self, db_session: DbSession, rows: list[dict[str, Any]]) -> int:
         """Insert or refresh one row per upsert key; rows sharing a key merge their statistics."""
-        unique: dict[tuple, dict[str, Any]] = {}
-        for row in rows:
-            row = row | {
-                column: round(row[column], SERIES_VALUE_SCALE) for column in _STATISTICS if row.get(column) is not None
-            }
-            key = tuple(row[column] for column in self.key_columns)
-            known = unique.get(key) or {column: None for column in self.refreshed} | {"id": uuid4()}
-            merged = known | {column: value for column, value in row.items() if value is not None}
-            if self.extremes_accumulate:
-                # As the database merges them: two of a session's extremes in one write keep the more extreme.
-                for column, pick in (("min", min), ("max", max)):
-                    stored, written = known.get(column), row.get(column)
-                    if isinstance(stored, Decimal) and isinstance(written, Decimal):
-                        merged[column] = pick(stored, written)
-            unique[key] = merged
+        unique = self._one_per_key(rows)
         for chunk in batched(self._in_key_order(unique), self.rows_per_statement):
             stmt = insert(self.model).values(list(chunk))
             db_session.execute(
@@ -82,3 +68,29 @@ class AggregateRepository:
             for row in db_session.query(self.model).filter(self.model.record_id == from_record_id)  # ty: ignore[unresolved-attribute]
         ]
         return self.upsert(db_session, rows) if rows else 0
+
+    def insert_missing(self, db_session: DbSession, rows: list[dict[str, Any]]) -> int:
+        """Insert the rows whose key is not stored yet; a stored row is left exactly as it is."""
+        inserted = 0
+        for chunk in batched(self._in_key_order(self._one_per_key(rows)), self.rows_per_statement):
+            stmt = insert(self.model).values(list(chunk)).on_conflict_do_nothing(constraint=self.upsert_key)
+            inserted += db_session.execute(stmt).rowcount  # ty: ignore[unresolved-attribute]
+        return inserted
+
+    def _one_per_key(self, rows: list[dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
+        unique: dict[tuple, dict[str, Any]] = {}
+        for row in rows:
+            row = row | {
+                column: round(row[column], SERIES_VALUE_SCALE) for column in _STATISTICS if row.get(column) is not None
+            }
+            key = tuple(row[column] for column in self.key_columns)
+            known = unique.get(key) or {column: None for column in self.refreshed} | {"id": uuid4()}
+            merged = known | {column: value for column, value in row.items() if value is not None}
+            if self.extremes_accumulate:
+                # As the database merges them: two of a session's extremes in one write keep the more extreme.
+                for column, pick in (("min", min), ("max", max)):
+                    stored, written = known.get(column), row.get(column)
+                    if isinstance(stored, Decimal) and isinstance(written, Decimal):
+                        merged[column] = pick(stored, written)
+            unique[key] = merged
+        return unique
