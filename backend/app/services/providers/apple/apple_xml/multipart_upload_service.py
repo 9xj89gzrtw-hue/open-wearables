@@ -295,8 +295,19 @@ class MultipartUploadService:
         error_class: type[AppError]
         if error_code in {"NoSuchUpload", "NoSuchKey", "NotFound", "404"}:
             error_class = NotFoundError
-        elif error_code in {"AccessDenied", "AllAccessDisabled", "Forbidden", "403"}:
-            error_class = PermissionDeniedError
+        elif error_code in {
+            "AccessDenied",
+            "AllAccessDisabled",
+            "Forbidden",
+            "403",
+            "InvalidAccessKeyId",
+            "SignatureDoesNotMatch",
+            "InvalidToken",
+            "ExpiredToken",
+        }:
+            # The bucket policy or the credentials refuse our own calls: our deployment's
+            # to fix, not the client's (whose key ownership _verify_owner checks) nor an outage.
+            error_class = ConfigurationError
         elif error_code in {
             "EntityTooSmall",
             "InvalidArgument",
@@ -307,9 +318,6 @@ class MultipartUploadService:
             error_class = InvalidInputError
         elif error_code in {"InternalError", "RequestTimeout", "ServiceUnavailable", "SlowDown"}:
             error_class = ServiceUnavailableError
-        elif error_code in {"InvalidAccessKeyId", "SignatureDoesNotMatch", "InvalidToken", "ExpiredToken"}:
-            # Rejected credentials are our deployment's to fix, not an object-store outage.
-            error_class = ConfigurationError
         else:
             # Connectivity and unknown object-store failures are upstream problems
             # rather than application-internal errors.

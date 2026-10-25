@@ -155,6 +155,15 @@ class TestMakeAuthenticatedRequest:
         assert exc_info.value.upstream_status == 400
         assert exc_info.value.detail == "Garmin API error (status 400)"
 
+    def test_error_in_a_200_body_with_a_string_code(self, mock_client: MagicMock, mock_token: MagicMock) -> None:
+        """A provider outage reported as "503" is still retried by a task, not dropped as a 400."""
+        self._answer(mock_client, _response(200, json={"error": "maintenance", "code": "503"}))
+
+        with pytest.raises(ProviderError) as exc_info:
+            api_client.make_authenticated_request(**_request_args())
+
+        assert exc_info.value.upstream_status == 503
+
 
 @patch("app.services.providers.api_client.get_valid_token", return_value="token")
 @patch("app.services.providers.api_client.httpx.get")

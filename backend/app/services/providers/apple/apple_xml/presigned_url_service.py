@@ -10,7 +10,7 @@ from app.services.providers.apple.apple_xml.aws_service import (
     get_s3_client,
     require_bucket_name,
 )
-from app.utils.exceptions import ConfigurationError, NotFoundError, PermissionDeniedError, UpstreamError
+from app.utils.exceptions import ConfigurationError, UpstreamError
 from app.utils.structured_logging import get_logger
 
 logger = get_logger(__name__)
@@ -46,10 +46,11 @@ class PresignedURLService:
             return bucket
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
+            # the configured bucket is missing or refuses our credentials: ours to fix, not the client's
             if error_code == "404":
-                raise NotFoundError("S3 bucket not found") from e
+                raise ConfigurationError("S3 bucket not found") from e
             if error_code == "403":
-                raise PermissionDeniedError("Access denied to S3 bucket") from e
+                raise ConfigurationError("Access denied to S3 bucket") from e
             raise UpstreamError(f"S3 bucket error: {error_code}") from e
 
     def create_presigned_url(self, user_id: str, request: PresignedURLRequest) -> PresignedURLResponse:

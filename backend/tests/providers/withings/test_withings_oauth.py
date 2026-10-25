@@ -72,6 +72,8 @@ def test_refresh_classifies_provider_statuses(
 
     assert type(exc_info.value) is error_class
     assert exc_info.value.status_code == http_status
+    # a refresh refused as bad input (247) is a request we built wrong, so it reaches Sentry
+    assert getattr(exc_info.value, "request_rejected", False) is (withings_status == 247)
     # Only a spent grant is terminal; the others are worth retrying with the same token.
     assert mock_revoke.called is invalid_grant
 

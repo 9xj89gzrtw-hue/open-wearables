@@ -29,6 +29,16 @@ MAX_RETRIES = 3
 RETRY_BASE_DELAY = 15.0  # Base delay for exponential backoff (seconds): 15s, 30s, 60s
 
 
+def _body_status(result: dict[str, Any]) -> int:
+    """The status a 200 body reports its error with, also when the code is a string; without
+    an error status there, the provider still rejected the request, so a 400."""
+    try:
+        code = int(result["code"])
+    except (KeyError, TypeError, ValueError):
+        return 400
+    return code if 400 <= code < 600 else 400
+
+
 def get_valid_token(
     db: DbSession,
     user_id: UUID,
@@ -226,11 +236,7 @@ def make_authenticated_request(
                         provider_name=provider_name,
                         error_msg=error_msg,
                     )
-                    # without a numeric code the provider still rejected the request: a 400
-                    code = result.get("code")
-                    raise provider_error_from_response(
-                        provider_name, code if isinstance(code, int) else 400, str(error_msg)
-                    )
+                    raise provider_error_from_response(provider_name, _body_status(result), str(error_msg))
 
             return result
 

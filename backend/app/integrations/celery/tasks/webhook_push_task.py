@@ -199,8 +199,11 @@ def process_webhook_push(
         # drops instead of retrying forever. 5xx, 429 and no response fall through to retry.
         # A rejected token is a ProviderConnectionError, dropped below like any client error.
         if exc.upstream_status in _NONRETRIABLE_UPSTREAM_STATUSES:
+            # A request the provider rejected (400, 422) is most likely our bug: alert on it.
             logger.warning(
                 "Webhook push task skipped — upstream non-retriable response",
+                exc_info=exc if exc.request_rejected else None,
+                alert=exc.request_rejected,
                 provider=provider_name,
                 trace_id=request_trace_id,
                 provider_user_id=provider_user_id,
@@ -212,16 +215,29 @@ def process_webhook_push(
                 "reason": "upstream_non_retriable",
                 "upstream_status": exc.upstream_status,
             }
-        logger.warning(
-            "Webhook push task failed, scheduling retry",
-            provider=provider_name,
-            trace_id=request_trace_id,
-            provider_user_id=provider_user_id,
-            upstream_status=exc.upstream_status,
-            error=exc.detail,
-            attempt=self.request.retries,
-            max_retries=self.max_retries,
-        )
+        if self.request.retries >= self.max_retries:
+            # The payload is lost now: say so, although an outage itself stays out of Sentry.
+            logger.warning(
+                "Webhook push task failed upstream, giving up",
+                exc_info=exc,
+                alert=True,
+                provider=provider_name,
+                trace_id=request_trace_id,
+                provider_user_id=provider_user_id,
+                upstream_status=exc.upstream_status,
+                attempt=self.request.retries,
+            )
+        else:
+            logger.warning(
+                "Webhook push task failed, scheduling retry",
+                provider=provider_name,
+                trace_id=request_trace_id,
+                provider_user_id=provider_user_id,
+                upstream_status=exc.upstream_status,
+                error=exc.detail,
+                attempt=self.request.retries,
+                max_retries=self.max_retries,
+            )
         raise self.retry(exc=exc)
     except Exception as exc:
         if _is_client_error(exc):

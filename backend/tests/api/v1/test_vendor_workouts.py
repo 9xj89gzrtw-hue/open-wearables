@@ -290,7 +290,7 @@ class TestVendorWorkoutsEndpoints:
         workout_id = "nonexistent"
         UserConnectionFactory(user=user, provider="garmin", status=ConnectionStatus.ACTIVE)
 
-        # The provider answers 404; its status and body are not passed through
+        # The provider answers 404; its body is not passed through
         mock_provider_factory.get_provider.return_value.workouts.get_workout_detail_from_api.side_effect = (
             ProviderError("garmin", upstream_status=404, upstream_body='{"message": "Workout not found"}')
         )
@@ -301,9 +301,9 @@ class TestVendorWorkoutsEndpoints:
             headers={"X-Open-Wearables-API-Key": api_key.plain_key},
         )
 
-        # Assert
-        assert response.status_code == 502
-        assert response.json() == {"detail": "Garmin API error (status 404)"}
+        # Assert: the client's id, so a 404 and not a 502 that reads "retry later"
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Workout not found"}
 
     def test_invalid_provider_returns_422(self, client: TestClient, db: Session) -> None:
         """Test that invalid provider enum value returns 400."""

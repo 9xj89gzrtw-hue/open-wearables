@@ -175,6 +175,35 @@ def test_upstream_outages_are_retried(exc: ProviderError) -> None:
         _run_with_failing_handler(exc)
 
 
+@pytest.mark.parametrize(("upstream_status", "alerted"), [(400, True), (422, True), (404, False), (410, False)])
+def test_only_a_request_the_provider_refused_alerts_when_skipped(upstream_status: int, alerted: bool) -> None:
+    """A 400 or 422 is most likely our bug; a deleted object at the provider is not."""
+    with patch.object(task, "logger") as logger:
+        _run_with_failing_handler(ProviderError("oura", upstream_status=upstream_status))
+
+    assert logger.warning.call_args.kwargs["alert"] is alerted
+
+
+def test_last_failed_attempt_alerts_that_the_payload_is_lost() -> None:
+    task.process_webhook_push.push_request(retries=task.process_webhook_push.max_retries)
+    try:
+        with patch.object(task, "logger") as logger, pytest.raises(Retry):
+            _run_with_failing_handler(ProviderError("oura", upstream_status=503))
+    finally:
+        task.process_webhook_push.pop_request()
+
+    assert logger.warning.call_args.args[0] == "Webhook push task failed upstream, giving up"
+    assert logger.warning.call_args.kwargs["alert"] is True
+
+
+def test_earlier_failed_attempts_do_not_alert() -> None:
+    with patch.object(task, "logger") as logger, pytest.raises(Retry):
+        _run_with_failing_handler(ProviderError("oura", upstream_status=503))
+
+    assert logger.warning.call_args.args[0] == "Webhook push task failed, scheduling retry"
+    assert "alert" not in logger.warning.call_args.kwargs
+
+
 @pytest.mark.parametrize(
     "exc",
     [

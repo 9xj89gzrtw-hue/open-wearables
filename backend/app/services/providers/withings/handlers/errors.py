@@ -42,9 +42,11 @@ def withings_token_error(
     client_error = withings_status in _TOKEN_CLIENT_ERROR_STATUSES or (http_status is not None and http_status < 500)
     if task == "exchange_token" and (authentication_failed or client_error):
         return InvalidInputError("Failed to exchange authorization code")
+    # a refresh Withings refused as bad input is a request we built wrong: reported, unlike an outage
     return ProviderError(
         "withings",
         detail,
         upstream_status=http_status,
         upstream_body=upstream_body,
+        request_rejected=True if client_error else None,
     )

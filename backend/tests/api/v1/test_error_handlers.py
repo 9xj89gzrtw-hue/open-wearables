@@ -83,7 +83,11 @@ class TestDomainErrors:
             ),
             (ProviderError("garmin"), 502, "Garmin API request failed"),
             (ProviderRateLimitError("garmin", upstream_status=429), 503, "Garmin API error (status 429)"),
-            (ServiceUnavailableError("S3 bucket not configured"), 503, "S3 bucket not configured"),
+            (
+                ServiceUnavailableError("Failed to complete multipart upload: SlowDown"),
+                503,
+                "Failed to complete multipart upload: SlowDown",
+            ),
         ],
     )
     def test_upstream_error_keeps_its_status_and_detail(

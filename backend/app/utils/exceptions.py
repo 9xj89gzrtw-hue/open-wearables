@@ -106,7 +106,13 @@ class ConfigurationError(AppError):
 
 
 def provider_label(provider: str) -> str:
-    return provider.capitalize()
+    return provider.replace("_", " ").title()
+
+
+# Provider 4xx answers that describe a user's or a resource's state (a revoked grant, a scope not
+# granted, data that isn't there, a duplicate, a throttle): only the user or time can change them.
+# Any other 4xx means the provider rejected the request itself, which is most likely our bug.
+_STATE_STATUSES = frozenset({401, 403, 404, 409, 410, 412, 429})
 
 
 class ProviderError(UpstreamError):
@@ -115,6 +121,9 @@ class ProviderError(UpstreamError):
     ``upstream_status`` is the provider's HTTP status, None when no response came back.
     ``upstream_body`` is what the provider answered: for logs and for callers that branch
     on it, never for ``detail``, which the client sees.
+    ``request_rejected``: the provider refused the request itself (a 400, a 422), most likely
+    because we built it wrong, so unlike an outage it is reported to Sentry. Derived from
+    ``upstream_status`` unless the caller knows better, e.g. from a status in the body.
     """
 
     def __init__(
@@ -124,10 +133,16 @@ class ProviderError(UpstreamError):
         *,
         upstream_status: int | None = None,
         upstream_body: str | None = None,
+        request_rejected: bool | None = None,
     ) -> None:
         self.provider = provider
         self.upstream_status = upstream_status
         self.upstream_body = upstream_body
+        if request_rejected is None:
+            request_rejected = (
+                upstream_status is not None and 400 <= upstream_status < 500 and upstream_status not in _STATE_STATUSES
+            )
+        self.request_rejected = request_rejected
         if detail is None:
             label = provider_label(provider)
             detail = (
@@ -142,6 +157,15 @@ class ProviderRateLimitError(ProviderError):
     """The provider kept throttling us after the client's own backoff."""
 
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
+def is_upstream_outage(exc: BaseException | None) -> bool:
+    """A provider or storage failure that is not our bug: logged as a warning, kept out of Sentry.
+
+    A request the provider rejected (``ProviderError.request_rejected``) doesn't count: when
+    a provider changes its API, every user of it fails the same way, and only Sentry tells us.
+    """
+    return isinstance(exc, UpstreamError) and not (isinstance(exc, ProviderError) and exc.request_rejected)
 
 
 class ProviderConnectionError(AppError):

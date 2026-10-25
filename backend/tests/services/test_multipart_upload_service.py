@@ -173,16 +173,17 @@ class TestComplete:
 
         assert exc.value.status_code == 400
 
-    def test_complete_access_denied_raises_403(self) -> None:
+    def test_complete_access_denied_is_a_configuration_error(self) -> None:
+        """The bucket policy refuses our own call: not the client's to fix."""
         client = MagicMock()
         client.complete_multipart_upload.side_effect = _client_error("AccessDenied")
         service = _service(client)
         key = f"{USER_ID}/raw/export.xml"
 
-        with pytest.raises(AppError) as exc:
+        with pytest.raises(ConfigurationError) as exc:
             service.complete_upload(USER_ID, key, "upload-1", [CompletedPart(part_number=1, etag="e")])
 
-        assert exc.value.status_code == 403
+        assert exc.value.status_code == 503
 
     def test_complete_accepts_explicit_bucket_for_background_job(self) -> None:
         client = MagicMock()

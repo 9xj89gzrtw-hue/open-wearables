@@ -115,9 +115,9 @@ GET /api/v1/oauth/garmin/authorize?user_id={user_id}
 }
 ```
 
-**Cause:** The provider's API failed or did not respond (`502`), or kept rate-limiting the request after retries (`503`). The provider's own response is not included.
+**Cause:** The provider's API failed or did not respond (`502`), or kept rate-limiting the request after retries (`503`). The `detail` names the provider's status; its own response is not included.
 
-**Solution:** Retry later. The user's connection is still valid.
+**Solution:** For a provider `5xx`, no response, or a `503`, retry later; the user's connection is still valid. A `502` naming a provider `4xx` (such as `status 400`) means the provider refused the request, and retrying it unchanged fails the same way.
 
 ### Provider Doesn't Support OAuth
 

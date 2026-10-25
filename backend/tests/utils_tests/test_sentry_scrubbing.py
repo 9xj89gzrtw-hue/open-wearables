@@ -9,7 +9,7 @@ import logging
 from collections.abc import Generator, Iterator
 from typing import Any
 from unittest.mock import MagicMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sentry_sdk
@@ -24,6 +24,7 @@ from app.config import settings
 from app.integrations import sentry as sentry_integration
 from app.main import app_error_handler
 from app.services import raw_payload_storage
+from app.services.providers.sync_247_result import Sync247Run
 from app.utils.config_utils import LogLevel
 from app.utils.exceptions import AppError, ConfigurationError, NotFoundError, ProviderError
 from app.utils.logging_setup import configure_app_logger
@@ -431,3 +432,22 @@ def test_failed_provider_call_is_a_warning_unless_alerted(captured: list[dict[st
     sentry_sdk.flush()
 
     assert [event["contexts"]["log"]["message"] for event in captured] == ["Garmin fetch keeps failing"]
+
+
+def test_request_the_provider_refused_is_reported_grouped(captured: list[dict[str, Any]]) -> None:
+    """Likely our bug (a provider changed its API): one issue per provider and status, not per user."""
+    response = _app_raising(ProviderError("garmin", upstream_status=400)).get("/provider-data")
+    sentry_sdk.flush()
+
+    assert response.status_code == 502
+    assert [event["fingerprint"] for event in captured] == [["{{ default }}", "garmin", "400"]]
+
+
+def test_captured_sync_step_reports_an_outage(captured: list[dict[str, Any]]) -> None:
+    """capture=True is an explicit ask to see the failure in Sentry, outage or not."""
+    run = Sync247Run("withings", MagicMock(), uuid4())
+    run.fail("sleep", _raised(ProviderError("withings", upstream_status=503)), capture=True)
+    run.fail("activity", _raised(ProviderError("withings", upstream_status=503)))
+    sentry_sdk.flush()
+
+    assert [event["contexts"]["log"]["data_type"] for event in captured] == ["sleep"]
