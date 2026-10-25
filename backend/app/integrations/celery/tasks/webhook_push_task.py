@@ -28,8 +28,8 @@ from app.utils.structured_logging import get_logger
 
 logger = get_logger(__name__)
 
-# Upstream 4xx where retrying can't recover the object. 401 (token refresh) and
-# 429 (rate limit) are excluded — those still benefit from a retry.
+# Upstream 4xx where retrying can't recover the object. 429 (rate limit) is excluded,
+# it benefits from a retry; a 401 never gets here, it is a ProviderConnectionError.
 _NONRETRIABLE_UPSTREAM_STATUSES = frozenset({400, 403, 404, 410, 422})
 
 # Providers whose webhook deliveries are surfaced in the sync log via this task.

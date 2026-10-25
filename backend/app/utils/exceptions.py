@@ -95,6 +95,16 @@ class ServiceUnavailableError(UpstreamError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
 
+class ConfigurationError(AppError):
+    """A setting the request needs is missing or rejected (storage bucket, credentials).
+
+    The deployment's to fix, not the client's: the client gets 503 with the detail, but
+    unlike an UpstreamError it is our failure, logged at its level and reported to Sentry.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
 def provider_label(provider: str) -> str:
     return provider.capitalize()
 

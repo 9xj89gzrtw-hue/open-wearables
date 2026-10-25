@@ -134,13 +134,10 @@ class TestGarminWebhookTaskEnqueue:
 class TestGarminWebhookRouting:
     """Routing and method checks for the unified provider webhook router."""
 
-    def test_get_challenge_returns_400(self, client: TestClient, db: Session) -> None:
-        """Garmin does not support GET subscription challenges — expect 400."""
+    def test_get_challenge_returns_501(self, client: TestClient, db: Session) -> None:
+        """Garmin does not support GET subscription challenges — expect 501."""
         response = client.get(PUSH_ENDPOINT)
-        assert response.status_code == 400
-        assert response.json() == {
-            "detail": "Provider 'garmin' does not support webhook subscription verification via GET."
-        }
+        assert response.status_code == 501
 
     def test_unknown_provider_returns_404(self, client: TestClient, db: Session) -> None:
         """Unknown provider names return 404."""

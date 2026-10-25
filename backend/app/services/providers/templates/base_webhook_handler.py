@@ -63,7 +63,8 @@ class BaseWebhookHandler(ABC):
     Optional overrides
     ------------------
     * ``handle_challenge`` – GET-based subscription verification (Strava
-      ``hub.challenge``, Oura ``verification_token``).  Defaults to 501.
+      ``hub.challenge``, Oura ``verification_token``).  Without an override the
+      unified router answers 501.
     * ``handle`` – the full pipeline orchestrator; override only when the
       standard *verify → parse → dispatch* sequence is insufficient.
     """
@@ -226,9 +227,9 @@ class BaseWebhookHandler(ABC):
         to verify webhook subscriptions (Strava ``hub.challenge``, Oura
         ``verification_token``).
 
-        Default implementation raises ``UnsupportedProviderError`` (400) so that
-        the unified router fails loudly for providers that have not wired up
-        challenge handling yet.
+        The unified router answers 501 itself when a handler does not override
+        this method, so the default is only a fallback for other callers: it
+        raises ``UnsupportedProviderError`` rather than pretending to verify.
 
         Args:
             request: The incoming GET request (query params carry challenge data).

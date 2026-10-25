@@ -9,7 +9,7 @@ from app.config import settings
 from app.schemas.providers.apple.apple_xml import CompletedPart
 from app.services.providers.apple.apple_xml import multipart_upload_service as mp_module
 from app.services.providers.apple.apple_xml.multipart_upload_service import MultipartUploadService
-from app.utils.exceptions import AppError
+from app.utils.exceptions import AppError, ConfigurationError, ServiceUnavailableError
 
 USER_ID = "user-123"
 
@@ -55,7 +55,7 @@ class TestCreate:
 
     def test_create_without_client_raises_503(self) -> None:
         service = _service(None)
-        with pytest.raises(AppError) as exc:
+        with pytest.raises(ConfigurationError) as exc:
             service.create_upload(USER_ID, "export.xml", "application/xml", file_size=1024 * 1024 * 5)
         assert exc.value.status_code == 503
 
@@ -75,7 +75,17 @@ class TestCreate:
         client = MagicMock()
         client.create_multipart_upload.side_effect = _client_error("InternalError")
         service = _service(client)
-        with pytest.raises(AppError) as exc:
+        with pytest.raises(ServiceUnavailableError) as exc:
+            service.create_upload(USER_ID, "export.xml", "application/xml", file_size=1024 * 1024 * 5)
+        assert exc.value.status_code == 503
+
+    @pytest.mark.parametrize("error_code", ["InvalidAccessKeyId", "SignatureDoesNotMatch"])
+    def test_create_with_rejected_credentials_is_a_configuration_error(self, error_code: str) -> None:
+        """Our deployment's to fix, so unlike an object-store outage it reaches Sentry."""
+        client = MagicMock()
+        client.create_multipart_upload.side_effect = _client_error(error_code)
+        service = _service(client)
+        with pytest.raises(ConfigurationError) as exc:
             service.create_upload(USER_ID, "export.xml", "application/xml", file_size=1024 * 1024 * 5)
         assert exc.value.status_code == 503
 

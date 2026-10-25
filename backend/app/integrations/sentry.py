@@ -8,6 +8,7 @@ from sentry_sdk.scrubber import DEFAULT_DENYLIST, DEFAULT_PII_DENYLIST, EventScr
 
 from app import __version__
 from app.config import settings
+from app.utils.exceptions import UpstreamError
 from app.utils.logging_setup import APP_LOGGER
 from app.utils.structured_logging import get_logger
 
@@ -91,15 +92,28 @@ def _mask_keys(value: Any, denylist: list[str]) -> Any:
     return value
 
 
-def _before_send_sensitive(event: "Event", hint: "Hint") -> "Event":
+def _is_unreported_upstream_error(event: "Event", hint: "Hint") -> bool:
+    """A failed provider or storage call is not our bug: the SDK's request and task hooks
+    capture it like any 5xx, so drop it here. A line logged with ``alert=True`` still ships
+    (its ``log`` context marks it): the caller asked for it explicitly."""
+    exc_info = hint.get("exc_info")
+    is_upstream = exc_info is not None and isinstance(exc_info[1], UpstreamError)
+    return is_upstream and "log" not in event.get("contexts", {})
+
+
+def _before_send_sensitive(event: "Event", hint: "Hint") -> "Event | None":
     """Credentials stay masked in the app log context too; EventScrubber skips contexts."""
+    if _is_unreported_upstream_error(event, hint):
+        return None
     if "contexts" in event:
         event["contexts"] = _mask_keys(event["contexts"], _credentials_scrubber.denylist)
     return event
 
 
-def before_send(event: "Event", hint: "Hint") -> "Event":
+def before_send(event: "Event", hint: "Hint") -> "Event | None":
     """Filter free text that the key-based scrubber can't see."""
+    if _is_unreported_upstream_error(event, hint):
+        return None
     # `contexts` is where app log events carry their message and attributes - EventScrubber skips it.
     for key in ("message", "logentry", "contexts", "extra"):
         if key in event:

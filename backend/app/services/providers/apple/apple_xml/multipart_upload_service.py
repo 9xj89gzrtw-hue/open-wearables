@@ -32,6 +32,7 @@ from app.services.providers.apple.apple_xml.aws_service import (
 )
 from app.utils.exceptions import (
     AppError,
+    ConfigurationError,
     InvalidInputError,
     NotFoundError,
     PermissionDeniedError,
@@ -48,14 +49,14 @@ class MultipartUploadService:
 
         client = get_s3_client()
         if not client:
-            raise ServiceUnavailableError("S3 client not configured")
+            raise ConfigurationError("S3 client not configured")
         return client
 
     def _require_public_client(self) -> Any:
         """Client for presigning browser-facing part URLs; falls back to the internal one."""
         client = get_public_s3_client() or get_s3_client()
         if not client:
-            raise ServiceUnavailableError("S3 client not configured")
+            raise ConfigurationError("S3 client not configured")
         return client
 
     @staticmethod
@@ -306,9 +307,12 @@ class MultipartUploadService:
             error_class = InvalidInputError
         elif error_code in {"InternalError", "RequestTimeout", "ServiceUnavailable", "SlowDown"}:
             error_class = ServiceUnavailableError
+        elif error_code in {"InvalidAccessKeyId", "SignatureDoesNotMatch", "InvalidToken", "ExpiredToken"}:
+            # Rejected credentials are our deployment's to fix, not an object-store outage.
+            error_class = ConfigurationError
         else:
-            # Authentication, connectivity, and unknown object-store failures are
-            # upstream/backend problems rather than application-internal errors.
+            # Connectivity and unknown object-store failures are upstream problems
+            # rather than application-internal errors.
             error_class = UpstreamError
         return error_class(f"{message}: {error_code}")
 

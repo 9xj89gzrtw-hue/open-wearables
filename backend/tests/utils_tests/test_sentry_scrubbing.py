@@ -22,9 +22,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.integrations import sentry as sentry_integration
+from app.main import app_error_handler
 from app.services import raw_payload_storage
 from app.utils.config_utils import LogLevel
-from app.utils.exceptions import NotFoundError
+from app.utils.exceptions import AppError, ConfigurationError, NotFoundError, ProviderError
 from app.utils.logging_setup import configure_app_logger
 from app.utils.structured_logging import get_logger
 
@@ -391,3 +392,42 @@ def test_failed_s3_upload_adds_no_breadcrumb(captured: list[dict[str, Any]]) -> 
 
     crumbs = captured[0].get("breadcrumbs", {}).get("values", [])
     assert not [c for c in crumbs if c.get("category") == "raw_payload" and c["data"]["provider"] == "oura"]
+
+
+def _app_raising(error: Exception) -> TestClient:
+    """An app with the real AppError handler, whose only route raises ``error``."""
+    app = FastAPI()
+    app.add_exception_handler(AppError, app_error_handler)
+
+    @app.get("/provider-data")
+    async def provider_data() -> None:
+        raise error
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_failed_provider_call_is_answered_but_not_reported(captured: list[dict[str, Any]]) -> None:
+    """The SDK reports every handled 5xx; a provider outage is not our bug."""
+    response = _app_raising(ProviderError("garmin", upstream_status=500)).get("/provider-data")
+    sentry_sdk.flush()
+
+    assert response.status_code == 502
+    assert captured == []
+
+
+def test_missing_setting_is_answered_and_reported(captured: list[dict[str, Any]]) -> None:
+    response = _app_raising(ConfigurationError("S3 bucket not configured")).get("/provider-data")
+    sentry_sdk.flush()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "S3 bucket not configured"}
+    assert [event["exception"]["values"][-1]["type"] for event in captured] == ["ConfigurationError"]
+
+
+def test_failed_provider_call_is_a_warning_unless_alerted(captured: list[dict[str, Any]]) -> None:
+    error = _raised(ProviderError("garmin", upstream_status=503))
+    app_logger.error("Garmin fetch failed", exc_info=error)
+    app_logger.warning("Garmin fetch keeps failing", exc_info=error, alert=True)
+    sentry_sdk.flush()
+
+    assert [event["contexts"]["log"]["message"] for event in captured] == ["Garmin fetch keeps failing"]

@@ -14,7 +14,7 @@ from botocore.exceptions import NoCredentialsError
 
 from app.config import settings
 from app.services.s3_client import create_s3_client
-from app.utils.exceptions import ServiceUnavailableError
+from app.utils.exceptions import ConfigurationError
 from app.utils.structured_logging import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 def require_bucket_name() -> str:
     """Return the configured bucket name or fail with the public API error."""
     if not settings.aws_bucket_name:
-        raise ServiceUnavailableError("S3 bucket not configured")
+        raise ConfigurationError("S3 bucket not configured")
     return settings.aws_bucket_name
 
 

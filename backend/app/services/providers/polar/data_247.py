@@ -1,10 +1,10 @@
 from collections.abc import Callable
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from http import HTTPStatus
 from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
-from fastapi import status
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
@@ -122,7 +122,7 @@ class Polar247Data(Base247DataTemplate):
         except ProviderError as e:
             # 404 = no data for this date / feature not available on this device
             # 204 No Content: api_client fails to parse the empty body as JSON
-            if e.upstream_status in (status.HTTP_404_NOT_FOUND, status.HTTP_204_NO_CONTENT):
+            if e.upstream_status in (HTTPStatus.NOT_FOUND, HTTPStatus.NO_CONTENT):
                 return None
             raise
 

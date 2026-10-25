@@ -807,7 +807,7 @@ class SuuntoWebhookHandler(BaseWebhookHandler):
         
         Override only if your provider uses a GET challenge/response handshake
         (like Strava hub.challenge or Oura verification_token).
-        Default raises UnsupportedProviderError (400).
+        Without an override the router answers 501.
         """
         token = request.query_params.get("hub.challenge", "")
         return {"hub.challenge": token}

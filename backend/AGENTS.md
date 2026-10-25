@@ -157,12 +157,13 @@ Services and repositories raise domain errors from `app/utils/exceptions.py`, th
 | `NotFoundError` (`ResourceNotFoundError`, `ProviderNotConnectedError`) | 404 |
 | `ConflictError` (`ProviderReauthorizationRequiredError`) | 409 |
 | `IntegrityError`: unique violation / foreign key to a missing row | 409 / 400 |
-| `UpstreamError` (`ProviderError`) / `ServiceUnavailableError` (`ProviderRateLimitError`) | 502 / 503, with its `detail` |
+| `UpstreamError` (`ProviderError`) | 502, with its `detail` |
+| `ServiceUnavailableError`; `ProviderRateLimitError` (a `ProviderError`, not a `ServiceUnavailableError`); `ConfigurationError` | 503, with its `detail` |
 | anything else, incl. other `IntegrityError`s and a bare `AppError` | 500 `{"detail": "Internal server error"}` |
 
 Celery tasks don't retry a 4xx domain error or any `IntegrityError`: the same input fails the same way on every attempt. A violation the client didn't cause (NOT NULL, CHECK) still fails the task, so it reaches Sentry.
 
-**Provider integrations** raise these too, never `HTTPException`. `api_client` turns a failed call into `provider_error_from_response(...)`: the provider's 401 becomes `ProviderReauthorizationRequiredError`, a 429 that outlasts the backoff `ProviderRateLimitError`, anything else (also no response at all) a `ProviderError`. A `ProviderError` keeps the provider's status in `upstream_status` and its answer in `upstream_body` - branch on those (a task's retry/drop decision, "no data" 404s), and never put the provider's answer into `detail`, which the client sees. The user's own connection state (`ProviderNotConnectedError`, `ProviderTokenUnavailableError`, `ProviderReauthorizationRequiredError`) is a `ProviderConnectionError`: never a 401, which would read as a bad API key, and never worth a retry. An `UpstreamError` is not our bug: it is logged as a warning and stays out of Sentry, also when passed as `exc_info`.
+**Provider integrations** raise these too, never `HTTPException`. `api_client` turns a failed call into `provider_error_from_response(...)`: the provider's 401 becomes `ProviderReauthorizationRequiredError`, a 429 that outlasts the backoff `ProviderRateLimitError`, anything else (also no response at all) a `ProviderError`. A `ProviderError` keeps the provider's status in `upstream_status` and its answer in `upstream_body` - branch on those (a task's retry/drop decision, "no data" 404s), and never put the provider's answer into `detail`, which the client sees. The user's own connection state (`ProviderNotConnectedError`, `ProviderTokenUnavailableError`, `ProviderReauthorizationRequiredError`) is a `ProviderConnectionError`: never a 401, which would read as a bad API key, and never worth a retry. An `UpstreamError` is not our bug: it is logged as a warning and `before_send` drops it from Sentry (the SDK reports every handled 5xx), unless a line logged with `alert=True` carries it. A missing or rejected setting (bucket, credentials) is a `ConfigurationError` instead: the client sees the 503 and its detail, and it reaches Sentry.
 
 ```python
 from app.utils.exceptions import ConflictError

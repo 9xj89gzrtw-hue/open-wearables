@@ -226,9 +226,10 @@ def make_authenticated_request(
                         provider_name=provider_name,
                         error_msg=error_msg,
                     )
+                    # without a numeric code the provider still rejected the request: a 400
                     code = result.get("code")
                     raise provider_error_from_response(
-                        provider_name, code if isinstance(code, int) else None, str(error_msg)
+                        provider_name, code if isinstance(code, int) else 400, str(error_msg)
                     )
 
             return result

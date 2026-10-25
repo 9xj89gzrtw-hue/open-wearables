@@ -20,7 +20,12 @@ from app.services.providers.sync_247_result import (
     Sync247Run,
     error_code_of,
 )
-from app.utils.exceptions import ProviderConnectionError, ProviderError, ProviderReauthorizationRequiredError
+from app.utils.exceptions import (
+    ProviderConnectionError,
+    ProviderError,
+    ProviderNotConnectedError,
+    ProviderReauthorizationRequiredError,
+)
 
 
 @pytest.fixture
@@ -172,10 +177,13 @@ class TestSync247Result:
 
 def test_error_code_carries_the_http_status_or_the_error_type_never_its_text() -> None:
     assert error_code_of(HTTPException(status_code=403, detail="user 42 revoked")) == "http_403"
-    assert error_code_of(ProviderReauthorizationRequiredError("p")) == "http_409"
     # the provider's own status, not the 502 the client gets
     assert error_code_of(ProviderError("p", upstream_status=404, upstream_body="user 42 not found")) == "http_404"
-    assert error_code_of(ProviderError("p")) == "http_502"
+    # our own status would read like the provider's: a lost grant is not the provider's 409,
+    # a call that got no response not its 502
+    assert error_code_of(ProviderReauthorizationRequiredError("p")) == "ProviderReauthorizationRequiredError"
+    assert error_code_of(ProviderNotConnectedError("p")) == "ProviderNotConnectedError"
+    assert error_code_of(ProviderError("p")) == "ProviderError"
     assert error_code_of(RuntimeError("heart_rate=72 violates constraint")) == "RuntimeError"
 
 

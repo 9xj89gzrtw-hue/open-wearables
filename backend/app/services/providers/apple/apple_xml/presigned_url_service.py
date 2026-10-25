@@ -10,7 +10,7 @@ from app.services.providers.apple.apple_xml.aws_service import (
     get_s3_client,
     require_bucket_name,
 )
-from app.utils.exceptions import NotFoundError, PermissionDeniedError, ServiceUnavailableError, UpstreamError
+from app.utils.exceptions import ConfigurationError, NotFoundError, PermissionDeniedError, UpstreamError
 from app.utils.structured_logging import get_logger
 
 logger = get_logger(__name__)
@@ -32,7 +32,7 @@ class PresignedURLService:
 
         s3_client = get_s3_client()
         if not s3_client:
-            raise ServiceUnavailableError("S3 client not configured")
+            raise ConfigurationError("S3 client not configured")
 
         bucket = require_bucket_name()
         try:
@@ -55,7 +55,7 @@ class PresignedURLService:
     def create_presigned_url(self, user_id: str, request: PresignedURLRequest) -> PresignedURLResponse:
         s3_client = get_s3_client()
         if not s3_client:
-            raise ServiceUnavailableError("S3 client not configured")
+            raise ConfigurationError("S3 client not configured")
 
         bucket = self.validate_bucket_exists()
 
