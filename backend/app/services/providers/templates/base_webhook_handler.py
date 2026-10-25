@@ -37,9 +37,10 @@ import hmac
 from abc import ABC, abstractmethod
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 
 from app.database import DbSession
+from app.utils.exceptions import UnsupportedProviderError, WebhookVerificationError
 from app.utils.structured_logging import get_logger
 
 logger = get_logger(__name__)
@@ -124,7 +125,7 @@ class BaseWebhookHandler(ABC):
             and is passed as-is to ``dispatch()``.
 
         Raises:
-            ``HTTPException(400)`` on malformed JSON or schema validation errors.
+            ``InvalidInputError`` on malformed JSON or schema validation errors.
         """
 
     @abstractmethod
@@ -203,8 +204,8 @@ class BaseWebhookHandler(ABC):
             Result ``dict`` from ``dispatch()``.
 
         Raises:
-            ``HTTPException(401)`` if ``verify_signature`` returns ``False``.
-            ``HTTPException(400)`` if ``parse_payload`` raises a validation error.
+            ``WebhookVerificationError`` (401) if ``verify_signature`` returns ``False``.
+            ``InvalidInputError`` (400) if ``parse_payload`` raises a validation error.
         """
         if not self.verify_signature(request, body):
             logger.warning(
@@ -213,7 +214,7 @@ class BaseWebhookHandler(ABC):
                 path=request.url.path,
                 client_host=request.client.host if request.client else None,
             )
-            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+            raise WebhookVerificationError("Invalid webhook signature")
 
         payload = self.parse_payload(body)
         return self.dispatch(db, payload)
@@ -225,8 +226,8 @@ class BaseWebhookHandler(ABC):
         to verify webhook subscriptions (Strava ``hub.challenge``, Oura
         ``verification_token``).
 
-        Default implementation raises ``501 Not Implemented`` so that the
-        unified router fails loudly for providers that have not wired up
+        Default implementation raises ``UnsupportedProviderError`` (400) so that
+        the unified router fails loudly for providers that have not wired up
         challenge handling yet.
 
         Args:
@@ -236,12 +237,9 @@ class BaseWebhookHandler(ABC):
             Provider-specific challenge response dict.
 
         Raises:
-            ``HTTPException(501)`` by default.
+            ``UnsupportedProviderError`` by default.
         """
-        raise HTTPException(
-            status_code=501,
-            detail=f"Provider '{self.provider_name}' does not support webhook subscription verification via GET.",
-        )
+        raise UnsupportedProviderError(self.provider_name, "webhook subscription verification via GET")
 
     # ------------------------------------------------------------------
     # Shared signature verification helpers (issue #712)

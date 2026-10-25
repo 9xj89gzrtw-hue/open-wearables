@@ -4,12 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
-from fastapi import HTTPException
 
 from app.config import settings
 from app.schemas.providers.apple.apple_xml import CompletedPart
 from app.services.providers.apple.apple_xml import multipart_upload_service as mp_module
 from app.services.providers.apple.apple_xml.multipart_upload_service import MultipartUploadService
+from app.utils.exceptions import AppError
 
 USER_ID = "user-123"
 
@@ -55,7 +55,7 @@ class TestCreate:
 
     def test_create_without_client_raises_503(self) -> None:
         service = _service(None)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.create_upload(USER_ID, "export.xml", "application/xml", file_size=1024 * 1024 * 5)
         assert exc.value.status_code == 503
 
@@ -64,7 +64,7 @@ class TestCreate:
         client = MagicMock()
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.create_upload(USER_ID, "export.xml", "application/xml", file_size=1024 * 1024 * 5)
 
         assert exc.value.status_code == 503
@@ -75,7 +75,7 @@ class TestCreate:
         client = MagicMock()
         client.create_multipart_upload.side_effect = _client_error("InternalError")
         service = _service(client)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.create_upload(USER_ID, "export.xml", "application/xml", file_size=1024 * 1024 * 5)
         assert exc.value.status_code == 503
 
@@ -95,7 +95,7 @@ class TestSignParts:
 
     def test_sign_parts_rejects_foreign_key(self) -> None:
         service = _service(MagicMock())
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.sign_upload_parts(USER_ID, "other-user/raw/x.xml", "upload-1", [1], expiration_seconds=3600)
         assert exc.value.status_code == 403
 
@@ -134,7 +134,7 @@ class TestComplete:
 
     def test_complete_rejects_foreign_key(self) -> None:
         service = _service(MagicMock())
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.complete_upload(
                 USER_ID,
                 "other/raw/x.xml",
@@ -148,7 +148,7 @@ class TestComplete:
         client.complete_multipart_upload.side_effect = _client_error("NoSuchUpload")
         service = _service(client)
         key = f"{USER_ID}/raw/export.xml"
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.complete_upload(USER_ID, key, "upload-1", [CompletedPart(part_number=1, etag="e")])
         assert exc.value.status_code == 404
 
@@ -158,7 +158,7 @@ class TestComplete:
         service = _service(client)
         key = f"{USER_ID}/raw/export.xml"
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.complete_upload(USER_ID, key, "upload-1", [CompletedPart(part_number=1, etag="e")])
 
         assert exc.value.status_code == 400
@@ -169,7 +169,7 @@ class TestComplete:
         service = _service(client)
         key = f"{USER_ID}/raw/export.xml"
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.complete_upload(USER_ID, key, "upload-1", [CompletedPart(part_number=1, etag="e")])
 
         assert exc.value.status_code == 403
@@ -202,7 +202,7 @@ class TestAbort:
 
     def test_abort_rejects_foreign_key(self) -> None:
         service = _service(MagicMock())
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.abort_upload(USER_ID, "other/raw/x.xml", "upload-1")
         assert exc.value.status_code == 403
 
@@ -238,7 +238,7 @@ class TestValidateCompletionRequest:
     def test_rejects_foreign_key_before_queueing(self) -> None:
         service = _service(MagicMock())
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 "other/raw/export.xml",
@@ -256,7 +256,7 @@ class TestValidateCompletionRequest:
         }
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -274,7 +274,7 @@ class TestValidateCompletionRequest:
         }
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -306,7 +306,7 @@ class TestValidateCompletionRequest:
         client.list_parts.side_effect = _client_error("NoSuchUpload")
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -327,7 +327,7 @@ class TestValidateCompletionRequest:
         }
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -346,7 +346,7 @@ class TestValidateCompletionRequest:
         }
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -364,7 +364,7 @@ class TestValidateCompletionRequest:
         }
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -382,7 +382,7 @@ class TestValidateCompletionRequest:
         }
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -407,7 +407,7 @@ class TestValidateCompletionRequest:
         ]
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",
@@ -430,7 +430,7 @@ class TestValidateCompletionRequest:
         ]
         service = _service(client)
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             service.validate_completion_request(
                 USER_ID,
                 f"{USER_ID}/raw/export.xml",

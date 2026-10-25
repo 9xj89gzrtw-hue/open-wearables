@@ -11,14 +11,19 @@ from typing import Any
 from uuid import UUID
 
 from celery import Task, shared_task
-from fastapi import HTTPException
 
 from app.constants.celery_tasks import CeleryTask
 from app.database import SessionLocal
 from app.schemas.sync_status import SyncStatus
 from app.services import sync_status_service
 from app.services.providers.factory import ProviderFactory
-from app.utils.exceptions import INTEGRITY_ERRORS, AppError, app_error_from_integrity_error, describe_integrity_error
+from app.utils.exceptions import (
+    INTEGRITY_ERRORS,
+    AppError,
+    ProviderError,
+    app_error_from_integrity_error,
+    describe_integrity_error,
+)
 from app.utils.structured_logging import get_logger
 
 logger = get_logger(__name__)
@@ -189,30 +194,31 @@ def process_webhook_push(
             error=str(exc),
         )
         raise
-    except HTTPException as exc:
+    except ProviderError as exc:
         # Non-retriable upstream 4xx (deleted/unqueryable object): ack so the task
-        # drops instead of retrying forever. 5xx and 401/429 fall through to retry.
-        if exc.status_code in _NONRETRIABLE_UPSTREAM_STATUSES:
+        # drops instead of retrying forever. 5xx, 429 and no response fall through to retry.
+        # A rejected token is a ProviderConnectionError, dropped below like any client error.
+        if exc.upstream_status in _NONRETRIABLE_UPSTREAM_STATUSES:
             logger.warning(
                 "Webhook push task skipped — upstream non-retriable response",
                 provider=provider_name,
                 trace_id=request_trace_id,
                 provider_user_id=provider_user_id,
-                upstream_status=exc.status_code,
-                error=str(exc.detail),
+                upstream_status=exc.upstream_status,
+                error=exc.detail,
             )
             return {
                 "status": "skipped",
                 "reason": "upstream_non_retriable",
-                "upstream_status": exc.status_code,
+                "upstream_status": exc.upstream_status,
             }
-        logger.error(
+        logger.warning(
             "Webhook push task failed, scheduling retry",
             provider=provider_name,
             trace_id=request_trace_id,
             provider_user_id=provider_user_id,
-            upstream_status=exc.status_code,
-            error=str(exc.detail),
+            upstream_status=exc.upstream_status,
+            error=exc.detail,
             attempt=self.request.retries,
             max_retries=self.max_retries,
         )

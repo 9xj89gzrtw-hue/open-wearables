@@ -20,7 +20,14 @@ from sqlalchemy.exc import IntegrityError
 import app.integrations.celery.tasks.webhook_push_task as task
 from app.repositories.data_point_series_repository import WriteCounts
 from app.schemas.sync_status import SyncStatus
-from app.utils.exceptions import AppError, NotFoundError
+from app.utils.exceptions import (
+    AppError,
+    NotFoundError,
+    ProviderError,
+    ProviderNotConnectedError,
+    ProviderRateLimitError,
+    ProviderReauthorizationRequiredError,
+)
 
 
 @pytest.fixture
@@ -145,6 +152,41 @@ def test_own_client_errors_are_dropped_not_retried(exc: Exception) -> None:
 def test_server_errors_are_retried(exc: Exception) -> None:
     with pytest.raises(Retry):
         _run_with_failing_handler(exc)
+
+
+@pytest.mark.parametrize("upstream_status", [400, 403, 404, 410, 422])
+def test_upstream_client_errors_are_dropped_not_retried(upstream_status: int) -> None:
+    """A deleted or unqueryable object at the provider fails the same way on every attempt."""
+    result = _run_with_failing_handler(ProviderError("oura", upstream_status=upstream_status))
+
+    assert result == {"status": "skipped", "reason": "upstream_non_retriable", "upstream_status": upstream_status}
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        ProviderError("oura", upstream_status=500),
+        ProviderError("oura"),  # no response: timeout, connection reset
+        ProviderRateLimitError("oura", upstream_status=429),
+    ],
+)
+def test_upstream_outages_are_retried(exc: ProviderError) -> None:
+    with pytest.raises(Retry):
+        _run_with_failing_handler(exc)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        ProviderReauthorizationRequiredError("oura"),
+        ProviderNotConnectedError("oura"),
+    ],
+)
+def test_unusable_connection_is_dropped_not_retried(exc: Exception) -> None:
+    """No retry gets past a revoked grant or a missing connection: only the user can fix it."""
+    result = _run_with_failing_handler(exc)
+
+    assert result == {"status": "skipped", "reason": "non_retriable", "error_type": type(exc).__name__}
 
 
 @pytest.mark.parametrize(

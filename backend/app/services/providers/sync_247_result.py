@@ -21,9 +21,14 @@ class SwallowedWriteError(Exception):
 def error_code_of(error: BaseException) -> str:
     """A short, value-free label for an error: the HTTP status when it has one, else its type.
 
+    For a failed provider call that is the provider's status, not the 502 we answer with.
     The exception text is left out: a database error carries the rows it failed on.
     """
-    status_code = getattr(error, "status_code", None) or getattr(getattr(error, "response", None), "status_code", None)
+    status_code = (
+        getattr(error, "upstream_status", None)
+        or getattr(error, "status_code", None)
+        or getattr(getattr(error, "response", None), "status_code", None)
+    )
     return f"http_{status_code}" if isinstance(status_code, int) else type(error).__name__
 
 

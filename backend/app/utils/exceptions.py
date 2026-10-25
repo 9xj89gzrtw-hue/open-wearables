@@ -39,6 +39,12 @@ class AuthenticationError(AppError):
     headers = {"WWW-Authenticate": "Bearer"}
 
 
+class WebhookVerificationError(AuthenticationError):
+    """A provider callback failed verification (signature, token): no bearer scheme to advertise."""
+
+    headers = None
+
+
 class PermissionDeniedError(AppError):
     status_code = status.HTTP_403_FORBIDDEN
 
@@ -75,6 +81,89 @@ class DatetimeParseError(InvalidInputError, ValueError):
         super().__init__(f"Invalid datetime format: '{value}'. Expected ISO 8601 format or Unix timestamp.")
 
 
+class UpstreamError(AppError):
+    """A service we call failed: a provider API, object storage.
+
+    Not our bug, so unlike other 5xx errors the client gets this status and ``detail``
+    instead of a bare 500, and it is logged as a warning rather than reported to Sentry.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+
+class ServiceUnavailableError(UpstreamError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
+def provider_label(provider: str) -> str:
+    return provider.capitalize()
+
+
+class ProviderError(UpstreamError):
+    """A provider API call failed.
+
+    ``upstream_status`` is the provider's HTTP status, None when no response came back.
+    ``upstream_body`` is what the provider answered: for logs and for callers that branch
+    on it, never for ``detail``, which the client sees.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        detail: str | None = None,
+        *,
+        upstream_status: int | None = None,
+        upstream_body: str | None = None,
+    ) -> None:
+        self.provider = provider
+        self.upstream_status = upstream_status
+        self.upstream_body = upstream_body
+        if detail is None:
+            label = provider_label(provider)
+            detail = (
+                f"{label} API error (status {upstream_status})"
+                if upstream_status is not None
+                else f"{label} API request failed"
+            )
+        super().__init__(detail)
+
+
+class ProviderRateLimitError(ProviderError):
+    """The provider kept throttling us after the client's own backoff."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
+class ProviderConnectionError(AppError):
+    """The user's connection to the provider can't be used: no request to the provider
+    succeeds, and no retry helps, until the user connects again."""
+
+    def __init__(self, provider: str, detail: str) -> None:
+        self.provider = provider
+        super().__init__(detail)
+
+
+class ProviderNotConnectedError(ProviderConnectionError, NotFoundError):
+    def __init__(self, provider: str) -> None:
+        super().__init__(provider, f"User is not connected to {provider_label(provider)}.")
+
+
+class ProviderTokenUnavailableError(ProviderConnectionError, InvalidInputError):
+    """The connection has no API token, e.g. an SDK-based provider."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(provider, f"No {provider_label(provider)} API access token for this user.")
+
+
+class ProviderReauthorizationRequiredError(ProviderConnectionError, ConflictError):
+    """The provider grant is gone: expired with no refresh token, or the provider rejected it."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            provider, f"{provider_label(provider)} authorization expired or was revoked; the user must reconnect."
+        )
+
+
 def integrity_violation(exc: IntegrityError | PsycopgIntegrityError) -> BaseException | None:
     """The driver error behind ``exc``, whether SQLAlchemy wrapped it or not."""
     return exc.orig if isinstance(exc, IntegrityError) else exc
@@ -98,3 +187,15 @@ def app_error_from_integrity_error(exc: IntegrityError | PsycopgIntegrityError) 
         # seeded rows no endpoint deletes - so this is a reference to a missing row
         return InvalidInputError("Referenced resource does not exist.")
     return None
+
+
+def provider_error_from_response(
+    provider: str, upstream_status: int | None, upstream_body: str | None = None
+) -> ProviderError | ProviderReauthorizationRequiredError:
+    """The error for a failed provider response: a rejected token means the user must
+    reconnect, a throttle we couldn't wait out is a 503, anything else a 502."""
+    if upstream_status == 401:
+        return ProviderReauthorizationRequiredError(provider)
+    if upstream_status == 429:
+        return ProviderRateLimitError(provider, upstream_status=upstream_status, upstream_body=upstream_body)
+    return ProviderError(provider, upstream_status=upstream_status, upstream_body=upstream_body)
