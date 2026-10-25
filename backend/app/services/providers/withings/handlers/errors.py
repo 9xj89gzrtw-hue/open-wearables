@@ -42,7 +42,9 @@ def withings_token_error(
     client_error = withings_status in _TOKEN_CLIENT_ERROR_STATUSES or (http_status is not None and http_status < 500)
     if task == "exchange_token" and (authentication_failed or client_error):
         return InvalidInputError("Failed to exchange authorization code")
-    # a refresh Withings refused as bad input is a request we built wrong: reported, unlike an outage
+    # The token endpoint has no per-user resource, so any refresh Withings refuses (a client status
+    # in the envelope, or an HTTP 4xx like 403/404) means our request or integration is wrong:
+    # reported, unlike an outage. The user's own state comes as an envelope status, handled above.
     return ProviderError(
         "withings",
         detail,

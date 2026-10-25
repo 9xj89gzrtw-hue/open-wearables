@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from app.schemas.auth import LiveSyncMode
@@ -76,6 +77,25 @@ def test_refresh_classifies_provider_statuses(
     assert getattr(exc_info.value, "request_rejected", False) is (withings_status == 247)
     # Only a spent grant is terminal; the others are worth retrying with the same token.
     assert mock_revoke.called is invalid_grant
+
+
+@pytest.mark.parametrize(("http_status", "request_rejected"), [(403, True), (404, True), (503, False)])
+@patch("app.services.providers.withings.oauth.httpx.post")
+def test_refresh_http_error_is_reported_unless_an_outage(
+    mock_post: MagicMock, http_status: int, request_rejected: bool
+) -> None:
+    request = httpx.Request("POST", "https://wbsapi.withings.net/v2/oauth2")
+    mock_post.return_value = httpx.Response(http_status, text="error", request=request)
+    oauth = _oauth()
+
+    with patch.object(oauth, "_revoke_connection") as mock_revoke, pytest.raises(ProviderError) as exc_info:
+        oauth.refresh_access_token(MagicMock(), uuid4(), "old-rt")
+
+    assert type(exc_info.value) is ProviderError
+    assert exc_info.value.upstream_status == http_status
+    # The token endpoint has no per-user resource: a 4xx there means our integration broke.
+    assert exc_info.value.request_rejected is request_rejected
+    mock_revoke.assert_not_called()
 
 
 @pytest.mark.parametrize("withings_status", [100, 247])
