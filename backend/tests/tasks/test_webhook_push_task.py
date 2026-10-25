@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import pytest
 from celery.exceptions import Retry
-from psycopg.errors import ForeignKeyViolation, NotNullViolation
+from psycopg.errors import CheckViolation, ForeignKeyViolation, NotNullViolation
 from sqlalchemy.exc import IntegrityError
 
 import app.integrations.celery.tasks.webhook_push_task as task
@@ -140,12 +140,28 @@ def test_own_client_errors_are_dropped_not_retried(exc: Exception) -> None:
     [
         AppError("broken invariant"),
         RuntimeError("database down"),
-        IntegrityError("stmt", {}, NotNullViolation("our bug, must reach Sentry")),
     ],
 )
 def test_server_errors_are_retried(exc: Exception) -> None:
     with pytest.raises(Retry):
         _run_with_failing_handler(exc)
+
+
+@pytest.mark.parametrize(
+    ("exc", "violation"),
+    [
+        (IntegrityError("INSERT ...", {"heart_rate": 187}, NotNullViolation("not null")), "NotNullViolation"),
+        (CheckViolation("raw psycopg, from a COPY"), "CheckViolation"),
+    ],
+)
+def test_own_constraint_bug_fails_without_retry(exc: Exception, violation: str) -> None:
+    """Retrying the same payload violates the constraint again; raising gets it to Sentry."""
+    with patch.object(task, "logger") as logger, pytest.raises(type(exc)):
+        _run_with_failing_handler(exc)
+
+    kwargs = logger.error.call_args.kwargs
+    assert kwargs["error_type"] == violation
+    assert "187" not in str(kwargs)
 
 
 def test_skipped_integrity_error_is_logged_without_the_payloads_values() -> None:

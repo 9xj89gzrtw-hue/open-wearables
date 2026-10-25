@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
-from psycopg.errors import ForeignKeyViolation, UniqueViolation
+from psycopg.errors import ForeignKeyViolation, NotNullViolation, UniqueViolation
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -573,6 +573,8 @@ class TestImportXmlData:
         (NotFoundError("User not found."), False),
         (IntegrityError("stmt", {}, UniqueViolation("duplicate key")), False),
         (ForeignKeyViolation("raw psycopg, from a COPY"), False),
+        # our bug, but just as deterministic: the failed task still reaches Sentry
+        (IntegrityError("stmt", {}, NotNullViolation("null value")), False),
     ],
 )
 def test_is_retryable(exc: Exception, retryable: bool) -> None:

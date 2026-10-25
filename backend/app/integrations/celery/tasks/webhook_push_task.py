@@ -133,7 +133,7 @@ def _emit_webhook_sync_status(provider_name: str, result: Any) -> None:
 def _is_client_error(exc: Exception) -> bool:
     """A 4xx domain error or a duplicate/FK violation from our own writes (e.g. the user was
     deleted meanwhile): the same payload fails the same way on retry, so drop it like an
-    upstream 4xx. A NOT NULL or CHECK violation is our bug and goes the retry/Sentry way."""
+    upstream 4xx. A NOT NULL or CHECK violation is our bug: it fails the task instead."""
     if isinstance(exc, INTEGRITY_ERRORS):
         return app_error_from_integrity_error(exc) is not None
     return isinstance(exc, AppError) and exc.is_client_error
@@ -227,6 +227,17 @@ def process_webhook_push(
                 **_error_attributes(exc),
             )
             return {"status": "skipped", "reason": "non_retriable", "error_type": type(exc).__name__}
+        if isinstance(exc, INTEGRITY_ERRORS):
+            # Our bug, and the same payload violates the constraint again on every retry:
+            # fail now, CeleryIntegration reports the raised exception to Sentry.
+            logger.error(
+                "Webhook push task failed — constraint violation",
+                provider=provider_name,
+                trace_id=request_trace_id,
+                provider_user_id=provider_user_id,
+                **_error_attributes(exc),
+            )
+            raise
         logger.error(
             "Webhook push task failed, scheduling retry",
             provider=provider_name,

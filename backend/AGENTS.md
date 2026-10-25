@@ -159,6 +159,8 @@ Services and repositories raise domain errors from `app/utils/exceptions.py`, th
 | `IntegrityError`: unique violation / foreign key to a missing row | 409 / 400 |
 | anything else, incl. other `IntegrityError`s and a bare `AppError` | 500 `{"detail": "Internal server error"}` |
 
+Celery tasks don't retry a 4xx domain error or any `IntegrityError`: the same input fails the same way on every attempt. A violation the client didn't cause (NOT NULL, CHECK) still fails the task, so it reaches Sentry.
+
 ```python
 from app.utils.exceptions import ConflictError
 
