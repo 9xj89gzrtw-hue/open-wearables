@@ -236,7 +236,7 @@ def make_authenticated_request(
                         provider_name=provider_name,
                         error_msg=error_msg,
                     )
-                    raise provider_error_from_response(provider_name, _body_status(result), str(error_msg))
+                    raise provider_error_from_response(provider_name, _body_status(result), response.text)
 
             return result
 
