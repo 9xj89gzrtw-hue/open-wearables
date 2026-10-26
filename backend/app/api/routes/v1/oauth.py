@@ -192,10 +192,7 @@ def update_provider_setting(
     _developer: DeveloperDep,
 ):
     """Update is_enabled and/or live_sync_mode for a single provider."""
-    try:
-        return provider_settings_service.update_provider_setting(db, provider, update)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return provider_settings_service.update_provider_setting(db, provider, update)
 
 
 @router.put("/providers", response_model=list[ProviderSettingRead], tags=["Internal: Providers"])
