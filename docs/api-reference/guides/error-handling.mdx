@@ -129,6 +129,8 @@ An error that needs no code of its own has the name of its HTTP status: `BAD_REQ
 | `CONFIGURATION_ERROR` | 503 | The deployment is missing a setting the request needs (storage, credentials) |
 | `INTERNAL_ERROR` | 500 | An unexpected server error |
 
+`UNSUPPORTED_PROVIDER` covers what a provider cannot be configured for, such as OAuth or live sync mode. A data or webhook endpoint the provider has no implementation of answers `501` with `NOT_IMPLEMENTED` instead.
+
 `WEBHOOK_VERIFICATION_FAILED` (`401`) is sent to providers whose webhook callback failed signature or token verification; your integration never sees it.
 
 ---
@@ -314,8 +316,8 @@ GET /api/v1/oauth/garmin/authorize?user_id={user_id}
 {
   "title": "Bad Request",
   "status": 400,
-  "detail": "Provider 'apple' does not support OAuth",
-  "code": "BAD_REQUEST"
+  "detail": "Provider 'apple' does not support OAuth.",
+  "code": "UNSUPPORTED_PROVIDER"
 }
 ```
 

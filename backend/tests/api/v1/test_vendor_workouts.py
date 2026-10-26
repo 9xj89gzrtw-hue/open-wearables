@@ -308,7 +308,7 @@ class TestVendorWorkoutsEndpoints:
         assert response.json()["detail"] == "Workout not found"
 
     def test_invalid_provider_returns_422(self, client: TestClient, db: Session) -> None:
-        """Test that invalid provider enum value returns 400."""
+        """Test that invalid provider enum value returns 422."""
         # Arrange
         user = UserFactory()
         api_key = ApiKeyFactory()

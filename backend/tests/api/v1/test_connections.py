@@ -226,12 +226,12 @@ class TestConnectionsEndpoints:
         assert response.status_code == 401
 
     def test_get_connections_invalid_user_id(self, client: TestClient, db: Session) -> None:
-        """Test handling of invalid user ID format returns 400."""
+        """Test handling of invalid user ID format returns 422."""
         # Arrange
         api_key = ApiKeyFactory()
         headers = api_key_headers(api_key.plain_key)
 
-        # Act - FastAPI/Starlette validates UUID path params and returns 400 Bad Request
+        # Act - FastAPI/Starlette validates UUID path params and returns 422
         response = client.get("/api/v1/users/not-a-uuid/connections", headers=headers)
 
         # Assert
@@ -418,7 +418,7 @@ class TestDisconnectEndpoint:
         # Act
         response = client.delete(f"/api/v1/users/{user.id}/connections/not_a_provider", headers=headers)
 
-        # Assert - FastAPI returns 400 for invalid enum path params
+        # Assert - FastAPI returns 422 for invalid enum path params
         assert response.status_code == 422
 
     def test_disconnect_missing_api_key(self, client: TestClient, db: Session) -> None:

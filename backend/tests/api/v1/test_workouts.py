@@ -373,7 +373,7 @@ class TestWorkoutsEndpoints:
         api_key = ApiKeyFactory()
         headers = api_key_headers(api_key.plain_key)
 
-        # Act & Assert - Invalid UUID causes 400 Bad Request (or 422 depending on config, but here 400)
+        # Act & Assert - Invalid UUID is a 422 validation error
         now = datetime.now(timezone.utc)
         start_date = (now - timedelta(days=30)).isoformat()
         end_date = (now + timedelta(days=1)).isoformat()

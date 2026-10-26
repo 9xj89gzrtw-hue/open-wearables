@@ -125,7 +125,8 @@ class TestOAuthAuthorizeEndpoint:
         )
 
         # Assert - Should fail because apple doesn't have OAuth
-        assert response.status_code in [400, 401, 422]
+        assert response.status_code == 400
+        assert response.json()["code"] == "UNSUPPORTED_PROVIDER"
 
 
 class TestOAuthProvidersEndpoint:
@@ -342,6 +343,7 @@ class TestOAuthUpdateProviderEndpoint:
 
         # Assert
         assert response.status_code == 400
+        assert response.json()["code"] == "BAD_REQUEST"
 
     def test_update_live_sync_mode_non_configurable_provider(
         self,
@@ -365,6 +367,7 @@ class TestOAuthUpdateProviderEndpoint:
 
         # Assert
         assert response.status_code == 400
+        assert response.json()["code"] == "UNSUPPORTED_PROVIDER"
 
     def test_update_provider_response_structure(
         self,
