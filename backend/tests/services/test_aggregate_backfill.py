@@ -1,7 +1,10 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
+import pytest
+from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 
 from app.integrations.celery.tasks.aggregate_backfill_task import run_aggregate_backfill
@@ -405,6 +408,31 @@ class TestDeleteCopiedSamples:
             (midnight + timedelta(days=1), Decimal("70"))
         ]
         assert (source.id, date(2025, 6, 2)) in pop_dirty_days(10)
+
+    def test_a_failed_queue_keeps_the_samples_for_the_next_run(self, db: Session) -> None:
+        """Once gone, the samples could not say which days to roll up again."""
+        source = DataSourceFactory(provider=ProviderName.POLAR)
+        _sample(db, source, SeriesType.heart_rate_variability_rmssd, datetime(2025, 6, 2, tzinfo=timezone.utc), "61")
+
+        with (
+            patch("app.integrations.rollup_queue.requeue_dirty_days", side_effect=RedisError),
+            pytest.raises(RedisError),
+        ):
+            aggregate_backfill_service.run(db, budget_seconds=60)
+        db.rollback()
+
+        assert db.query(SeriesSample).count() == 1
+
+    def test_the_delete_waits_for_a_scheduled_rollup_in_progress(self, db: Session) -> None:
+        source = DataSourceFactory(provider=ProviderName.POLAR)
+        _sample(db, source, SeriesType.heart_rate_variability_rmssd, datetime(2025, 6, 2, tzinfo=timezone.utc), "61")
+        # Every step but the delete, which then runs on its own while the rollup holds the lock.
+        DataMigrationRepository().mark_completed(db, "aggregate_backfill:delete_copied_samples")
+        aggregate_backfill_service.run(db, budget_seconds=60)
+        get_redis_client().set("series_rollup:lock", "1")
+
+        assert not aggregate_backfill_service._delete_copied_samples(db, deadline=float("inf"))
+        assert db.query(SeriesSample).count() == 1
 
     def test_a_sample_matching_another_statistic_of_the_providers_row_stays(self, db: Session) -> None:
         source = DataSourceFactory(provider=ProviderName.POLAR)
