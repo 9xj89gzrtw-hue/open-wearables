@@ -14,23 +14,11 @@ from celery import Task, shared_task
 from app.config import settings
 from app.constants.celery_tasks import CeleryTask
 from app.database import SessionLocal
-from app.integrations.redis_client import get_redis_client
+from app.integrations import rollup_queue
 from app.services.archival_service import archival_service
 from app.utils.structured_logging import log_structured
 
 logger = getLogger(__name__)
-
-_ROLLUP_LOCK_KEY = "series_rollup:lock"
-# Longer than either task may run, so a killed worker cannot hold the lock for good.
-_ROLLUP_LOCK_TTL_SECONDS = 400
-
-
-def _take_rollup_lock() -> bool:
-    return bool(get_redis_client().set(_ROLLUP_LOCK_KEY, "1", nx=True, ex=_ROLLUP_LOCK_TTL_SECONDS))
-
-
-def _release_rollup_lock() -> None:
-    get_redis_client().delete(_ROLLUP_LOCK_KEY)
 
 
 @shared_task(name=CeleryTask.ROLL_UP_QUEUED_DAYS, soft_time_limit=120, time_limit=150)
@@ -39,13 +27,13 @@ def roll_up_queued_days() -> dict:
 
     Runs whether or not the lifecycle tab is on: summaries and day reads are served from the rows it writes.
     """
-    if not _take_rollup_lock():
+    if not rollup_queue.take_lock():
         return {"skipped": "previous_run_in_progress"}
     try:
         with SessionLocal() as db:
             return {"rolled_up_days": archival_service.roll_up_queued_days(db)}
     finally:
-        _release_rollup_lock()
+        rollup_queue.release_lock()
 
 
 @shared_task(
@@ -66,7 +54,7 @@ def run_daily_archival(self: Task) -> dict:
     """
     if not settings.data_lifecycle_enabled:
         return {"skipped": "data_lifecycle_disabled"}
-    if not _take_rollup_lock():
+    if not rollup_queue.take_lock():
         # The 15-minute run fires at 03:00 too; both roll up, so one waits for the other.
         raise self.retry(countdown=60)
 
@@ -80,4 +68,4 @@ def run_daily_archival(self: Task) -> dict:
         log_structured(logger, "error", "Daily archival task failed")
         raise
     finally:
-        _release_rollup_lock()
+        rollup_queue.release_lock()

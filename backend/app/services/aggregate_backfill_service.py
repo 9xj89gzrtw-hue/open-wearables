@@ -9,6 +9,7 @@ from typing import cast
 from uuid import UUID
 
 from app.database import DbSession
+from app.integrations import rollup_queue
 from app.integrations.redis_client import get_redis_client
 from app.repositories.aggregate_backfill_repository import AggregateBackfillRepository
 from app.repositories.data_migration_repository import DataMigrationRepository
@@ -142,10 +143,14 @@ class AggregateBackfillService:
                     if (since is None or day >= since) and (done_before is None or day < done_before)
                 ]
                 for chunk in _newest_first(days, ROLLUP_CHUNK_DAYS):
-                    if time.monotonic() >= deadline:
+                    # Under the scheduled rollup's lock a chunk at a time, so that rollup still runs in between.
+                    if time.monotonic() >= deadline or not rollup_queue.take_lock():
                         return False
-                    self.rollup_repo.roll_up(db, source_id, chunk)
-                    db.commit()
+                    try:
+                        self.rollup_repo.roll_up(db, source_id, chunk)
+                        db.commit()
+                    finally:
+                        rollup_queue.release_lock()
                     redis.set(day_key, f"{source_id}|{min(chunk).isoformat()}")
                 redis.delete(day_key)
                 return True
