@@ -86,7 +86,7 @@ class TestOAuthAuthorizeEndpoint:
         response = client.get("/api/v1/oauth/garmin/authorize")
 
         # Assert
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     def test_authorize_invalid_user_id(self, client: TestClient, db: Session) -> None:
         """Test authorization with invalid user_id format."""
@@ -97,7 +97,7 @@ class TestOAuthAuthorizeEndpoint:
         )
 
         # Assert
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     def test_authorize_invalid_provider(self, client: TestClient, db: Session) -> None:
         """Test authorization with non-existent provider."""

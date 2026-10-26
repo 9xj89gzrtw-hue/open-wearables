@@ -242,7 +242,7 @@ class TestChangePassword:
 
         response = client.post(f"{api_v1_prefix}/auth/change-password", json=payload, headers=headers)
 
-        assert response.status_code == 400
+        assert response.status_code == 422
         assert "The confirmation password does not match" in str(response.json())
 
     def test_change_password_too_short(self, client: TestClient, db: Session, api_v1_prefix: str) -> None:
@@ -257,7 +257,7 @@ class TestChangePassword:
 
         response = client.post(f"{api_v1_prefix}/auth/change-password", json=payload, headers=headers)
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
 
 class TestGetCurrentDeveloper:
