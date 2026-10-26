@@ -333,3 +333,11 @@ class TestOpenAPI:
         assert schema["paths"]["/api/v1/users"]["post"]["responses"]["422"]["content"]["application/problem+json"][
             "schema"
         ] == {"$ref": "#/components/schemas/ValidationProblem"}
+
+    def test_login_documents_its_validation_errors_as_a_failed_login(self) -> None:
+        responses = api.openapi()["paths"]["/api/v1/auth/login"]["post"]["responses"]
+
+        assert "422" not in responses
+        assert responses["401"]["content"]["application/problem+json"]["schema"] == {
+            "$ref": "#/components/schemas/Problem"
+        }

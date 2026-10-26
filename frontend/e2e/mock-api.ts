@@ -117,9 +117,19 @@ function issueTokens() {
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-/** The API's RFC 9457 error body, without the `title` nothing reads. */
+/** The `title` the API puts on each status it answers here. */
+const TITLES: Record<number, string> = {
+	400: 'Bad Request',
+	401: 'Unauthorized',
+	404: 'Not Found',
+	409: 'Conflict',
+	422: 'Unprocessable Content',
+	500: 'Internal Server Error'
+};
+
+/** The API's RFC 9457 error body. */
 const problem = (status: number, detail: string, code: string, extra: object = {}) =>
-	new Response(JSON.stringify({ status, detail, code, ...extra }), {
+	new Response(JSON.stringify({ title: TITLES[status], status, detail, code, ...extra }), {
 		status,
 		headers: { 'Content-Type': 'application/problem+json' }
 	});
@@ -331,7 +341,14 @@ const server = Bun.serve({
 
 		if (pathname === '/api/v1/settings/seed' && request.method === 'POST') {
 			const body = await request.json();
-			if (body.num_users < 1 || body.num_users > 10) {
+			if (body.num_users < 1) {
+				return invalid(
+					['body', 'num_users'],
+					'Input should be greater than or equal to 1',
+					'greater_than_equal'
+				);
+			}
+			if (body.num_users > 10) {
 				return invalid(
 					['body', 'num_users'],
 					'Input should be less than or equal to 10',
@@ -361,6 +378,21 @@ const server = Bun.serve({
 				] as const;
 				const [field, max] = limits.find(([name, max]) => out(body[name], max)) ?? [];
 				if (field) {
+					const days = body[field];
+					if (!Number.isInteger(days)) {
+						return invalid(
+							['body', field],
+							'Input should be a valid integer, got a number with a fractional part',
+							'int_from_float'
+						);
+					}
+					if (days < 1) {
+						return invalid(
+							['body', field],
+							'Input should be greater than or equal to 1',
+							'greater_than_equal'
+						);
+					}
 					return invalid(
 						['body', field],
 						`Input should be less than or equal to ${max}`,

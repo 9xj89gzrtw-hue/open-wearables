@@ -237,7 +237,12 @@ mount_routers(api, settings.api_v1, API_KEY_REQUIRED)
 
 def _openapi() -> dict[str, Any]:
     if not api.openapi_schema:
-        api.openapi_schema = add_problem_responses(FastAPI.openapi(api))
+        schema = FastAPI.openapi(api)
+        # the login form's validation errors are answered as a failed login, never a 422
+        for path, operations in schema["paths"].items():
+            if path.endswith("/auth/login"):
+                operations["post"]["responses"].pop("422", None)
+        api.openapi_schema = add_problem_responses(schema)
     return api.openapi_schema
 
 

@@ -8897,12 +8897,18 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "401": {
+            "description": "Incorrect email or password, or a field missing from the form",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationProblem"
+                  "$ref": "#/components/schemas/Problem"
+                },
+                "example": {
+                  "title": "Unauthorized",
+                  "status": 401,
+                  "detail": "Incorrect email or password",
+                  "code": "UNAUTHORIZED"
                 }
               }
             }

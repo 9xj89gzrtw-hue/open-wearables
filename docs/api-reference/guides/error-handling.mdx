@@ -47,7 +47,7 @@ Every error response uses [RFC 9457 Problem Details](https://www.rfc-editor.org/
 The `type` member of RFC 9457 is omitted, which the RFC defines as `about:blank`: the error is fully described by its status and `code`.
 
 <Tip>
-  Responses that carry no body by definition (`204`, `304`) stay empty. Everything else, including unexpected `500`s, has the body above.
+  Responses that carry no body by definition (`204`, `304`, and any answer to a `HEAD` request) stay empty. Everything else, including unexpected `500`s, has the body above.
 </Tip>
 
 ### Handling Errors in Code
