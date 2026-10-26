@@ -44,7 +44,9 @@ export type Developer = {
 export class ApiError extends Error {
 	constructor(
 		readonly status: number,
-		message: string
+		message: string,
+		/** The Problem Details `code` (`NOT_FOUND`, `INVITATION_EXPIRED`, ...), when there is a body. */
+		readonly code?: string
 	) {
 		super(message);
 		this.name = 'ApiError';
@@ -53,13 +55,15 @@ export class ApiError extends Error {
 
 async function raiseFor(response: Response): Promise<never> {
 	let detail: string | undefined;
+	let code: string | undefined;
 	try {
 		const body = await response.json();
 		detail = typeof body?.detail === 'string' ? body.detail : undefined;
+		code = typeof body?.code === 'string' ? body.code : undefined;
 	} catch {
 		detail = undefined;
 	}
-	throw new ApiError(response.status, detail ?? response.statusText);
+	throw new ApiError(response.status, detail ?? response.statusText, code);
 }
 
 /** OAuth2 password flow: form-encoded, and the field is `username`. */
