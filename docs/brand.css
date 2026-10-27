@@ -1,4 +1,4 @@
-/* Open Wearables design system, as on openwearables.io/design-system.
+/* Open Wearables design system, as on openwearables.io.
    The site is light only, so the docs are too (docs.json sets
    appearance.strict). Mintlify includes every .css file in the content
    directory. docs.json loads Switzer for headings and body; this file adds
