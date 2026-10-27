@@ -28,6 +28,13 @@
   --ow-black: #000000;
 }
 
+/* Product Hunt only offers light, neutral and dark badges and serves them
+   without CORS, so the live image is tinted instead: this turns the neutral
+   badge's slate (#4b587c) into --ow-blue and leaves its white as is. */
+img[src*="api.producthunt.com/widgets"] {
+  filter: saturate(3.1) hue-rotate(-5deg);
+}
+
 code,
 kbd,
 pre,
