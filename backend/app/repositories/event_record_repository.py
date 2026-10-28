@@ -78,11 +78,11 @@ _NIGHT_FROM_SAMPLES = text("""
         (SELECT avg(s.value) FROM series_sample s
          WHERE s.data_source_id = er.data_source_id AND s.series_type_definition_id = m.type_id
             AND s.recorded_at >= er.start_datetime AND s.recorded_at <= er.end_datetime
-            AND s.is_daily_total IS NOT TRUE AND s.history_value IS NOT TRUE),
+            AND s.is_daily_total IS NOT TRUE),
         (SELECT avg(s.value) FROM data_source other
          JOIN series_sample s ON s.data_source_id = other.id AND s.series_type_definition_id = m.type_id
             AND s.recorded_at >= er.start_datetime AND s.recorded_at <= er.end_datetime
-            AND s.is_daily_total IS NOT TRUE AND s.history_value IS NOT TRUE
+            AND s.is_daily_total IS NOT TRUE
          WHERE other.user_id = own.user_id AND other.id <> own.id)
     ) AS avg
     FROM unnest(CAST(:record_ids AS uuid[]), CAST(:type_ids AS integer[])) AS m(record_id, type_id)
